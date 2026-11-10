@@ -1,0 +1,7 @@
+{
+    "python-envs.defaultEnvManager": "ms-python.python:system",
+    "workbench.editorAssociations": {
+        "*.stp": "o3dv.viewer",
+        "*.step": "o3dv.viewer"
+    }
+}
