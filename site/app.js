@@ -64,7 +64,7 @@
     accentColor.set(v("--accent") || "#1f5fd1");
     markGroup.children.forEach((m) => m.material && m.material.color && m.material.color.copy(markColor));
     if (faceOverlay) faceOverlay.material.color.copy(accentColor);
-    if (selectedMesh) selectedMesh.material.emissive.copy(accentColor);
+    selected.forEach((m) => m.material.emissive.copy(accentColor));
     requestRender();
   }
   window.matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", applyTheme);
@@ -75,7 +75,7 @@
   let modelBox = new THREE.Box3();
   let modelRadius = 100;
   let mode = "part";
-  let selectedMesh = null, faceOverlay = null;
+  let selected = [], selectedGroup = null, faceOverlay = null;
   let picks = [];
   let currentFace = null;
   let measureLine = null, labelPos = null;
@@ -379,21 +379,39 @@
 
   // ---------- selection & marks ----------
   function clearSelection() {
-    if (selectedMesh) { selectedMesh.material.emissive.setRGB(0, 0, 0); selectedMesh = null; }
+    selected.forEach((m) => m.material.emissive.setRGB(0, 0, 0));
+    selected = []; selectedGroup = null;
     if (faceOverlay) { faceOverlay.geometry.dispose(); faceOverlay.material.dispose(); faceOverlay.parent.remove(faceOverlay); faceOverlay = null; }
     currentFace = null;
     document.querySelectorAll(".row.sel").forEach((r) => r.classList.remove("sel"));
     requestRender();
   }
-  function selectMesh(mesh) {
+  function selectMeshes(list, row) {
     clearSelection();
-    selectedMesh = mesh;
-    mesh.material.emissive.copy(accentColor);
-    mesh.material.emissiveIntensity = 0.35;
-    const row = document.querySelector(`.row[data-mesh="${mesh.userData.index}"]`);
+    selected = list;
+    list.forEach((m) => { m.material.emissive.copy(accentColor); m.material.emissiveIntensity = 0.35; });
     if (row) row.classList.add("sel");
     requestRender();
   }
+  function selectMesh(mesh) {
+    selectMeshes([mesh], document.querySelector(`.row[data-mesh="${mesh.userData.index}"]`));
+  }
+  function selectGroup(ids, name, row) {
+    ids.forEach((i) => { meshes[i].visible = true; });
+    syncChecks();
+    selectMeshes(ids.map((i) => meshes[i]), row);
+    selectedGroup = { ids, name };
+    groupReadout(selectedGroup);
+  }
+
+  // Bodies with the same triangle count, the same dimensions (in any orientation) and the
+  // same volume are treated as identical copies, e.g. the teeth on a comb or repeated bolts.
+  function sigOf(mesh) {
+    if (mesh.userData.sig) return mesh.userData.sig;
+    const d = mesh.geometry.boundingBox.getSize(new THREE.Vector3()).toArray().map((v) => v.toFixed(2)).sort();
+    return (mesh.userData.sig = `${mesh.geometry.index.count}|${d.join("x")}|${meshStats(mesh).volume.toPrecision(5)}`);
+  }
+  const twinsOf = (mesh) => meshes.filter((m) => sigOf(m) === sigOf(mesh));
   function highlightFace(mesh, fis) {
     clearSelection();
     const src = mesh.geometry.index.array, parts = [];
@@ -455,6 +473,12 @@
   readout.addEventListener("click", (e) => {
     if (e.target.closest("[data-more]")) { detailsOpen = !detailsOpen; store.set("details", detailsOpen ? "1" : "0"); syncDetails(); return; }
     if (e.target.closest("[data-clear]")) { clearSelection(); clearMarks(); showHint(); }
+    const tw = e.target.closest("[data-twins]");
+    if (tw) {
+      const m = meshes[+tw.dataset.twins], ids = twinsOf(m).map((x) => x.userData.index);
+      const grpRow = [...document.querySelectorAll(".tree .row.grp")].find((r) => r.dataset.ids === ids.join(","));
+      selectGroup(ids, grpRow ? grpRow.querySelector(".nm").textContent : m.userData.name, grpRow);
+    }
   });
 
   function partReadout(mesh) {
@@ -462,8 +486,20 @@
     const st = meshStats(mesh);
     setReadout(`${head("Part", mesh.userData.name)}
       <div class="big">${sizeStr(s)} <small>${unit}</small></div>
-      <dl class="kv"><dt>Volume</dt><dd>${fmtVol(st.volume)}</dd><dt>Surface area</dt><dd>${fmtArea(st.area)}</dd>
+      <dl class="kv">${twinsOf(mesh).length > 1 ? `<dt>Identical in file</dt><dd><button class="link" type="button" data-twins="${mesh.userData.index}">Select all ${twinsOf(mesh).length}</button></dd>` : ""}<dt>Volume</dt><dd>${fmtVol(st.volume)}</dd><dt>Surface area</dt><dd>${fmtArea(st.area)}</dd>
       <dt>Faces</dt><dd>${mesh.userData.faces.length}</dd></dl>`);
+  }
+
+  function groupReadout({ ids, name }) {
+    const list = ids.map((i) => meshes[i]);
+    const box = new THREE.Box3(); list.forEach((m) => box.union(m.geometry.boundingBox));
+    const vol = list.reduce((t, m) => t + meshStats(m).volume, 0);
+    const same = list.every((m) => sigOf(m) === sigOf(list[0]));
+    const each = list[0].geometry.boundingBox.getSize(new THREE.Vector3());
+    setReadout(`${head(same ? `${list.length} identical` : "Group", name)}
+      <div class="big">${sizeStr(box.getSize(new THREE.Vector3()))} <small>${unit}</small></div>
+      <dl class="kv"><dt>Parts</dt><dd>${list.length}</dd>${same ? `<dt>Each part</dt><dd>${sizeStr(each)}</dd>` : ""}
+      <dt>Total volume</dt><dd>${fmtVol(vol)}</dd></dl>`);
   }
 
   function describeFace(f) {
@@ -579,7 +615,8 @@
     unit = unit === "mm" ? "in" : "mm"; store.set("unit", unit); $("unitBtn").textContent = unit;
     showOverallChip();
     if (mode === "dist" && picks.length) distReadout();
-    else if (selectedMesh) partReadout(selectedMesh);
+    else if (selectedGroup) groupReadout(selectedGroup);
+    else if (selected.length) partReadout(selected[0]);
     else if (faceOverlay && currentFace) faceReadout(...currentFace);
     else showHint();
   });
@@ -613,12 +650,42 @@
         if (node.name) meshes[mi].userData.name = node.name;
         return;
       }
+      // CAD exporters often name a plain bag of solids "COMPOUND" or "SOLID"; show it as "Bodies" and open it
+      const generic = /^(compound|compsolid|solid|shell)$/i.test((node.name || "").trim());
       const det = document.createElement("details");
-      det.open = depth < 1;
-      det.appendChild(makeRow(node.name || "Assembly", ids, depth, true));
-      node.children.forEach((c) => add(c, depth + 1, det));
-      node.meshes.forEach((mi) => det.appendChild(makeRow(meshes[mi].userData.name, [mi], depth + 1, false, mi)));
+      det.open = depth < 1 || generic;
+      det.appendChild(makeRow(generic ? "Bodies" : node.name || "Assembly", ids, depth, true));
+      const leaves = [];
+      node.children.forEach((c) => {
+        if (!c.children.length && c.meshes.length === 1) {
+          if (c.name) meshes[c.meshes[0]].userData.name = c.name;
+          leaves.push(c.meshes[0]);
+        } else add(c, depth + 1, det);
+      });
+      leaves.push(...node.meshes);
+      addLeaves(leaves, depth + 1, det);
       parent.appendChild(det);
+    };
+    // list single parts, putting identical copies together under one collapsible row
+    const addLeaves = (list, depth, parent) => {
+      const groups = new Map();
+      list.forEach((mi) => { const k = sigOf(meshes[mi]); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(mi); });
+      // groups first (largest first), then single bodies in file order
+      const ordered = [...groups.values()].sort((a, b) => (b.length > 1) - (a.length > 1) || (b.length > 1 ? b.length - a.length : 0));
+      ordered.forEach((g) => {
+        if (g.length < 2) { parent.appendChild(makeRow(meshes[g[0]].userData.name, g, depth, false, g[0])); return; }
+        const names = new Set(g.map((i) => meshes[i].userData.name));
+        const d = meshes[g[0]].geometry.boundingBox.getSize(new THREE.Vector3()).toArray().sort((a, b) => b - a)
+          .map((v) => (v >= 100 ? v.toFixed(0) : v.toFixed(1))).join(" × ");
+        const nm = names.size === 1 ? [...names][0] : `${d} mm`;
+        const det = document.createElement("details");
+        const row = makeRow(nm, g, depth, true);
+        row.classList.add("grp");
+        row.querySelector(".ct").textContent = "×" + g.length;
+        det.appendChild(row);
+        g.forEach((mi) => det.appendChild(makeRow(meshes[mi].userData.name, [mi], depth + 1, false, mi)));
+        parent.appendChild(det);
+      });
     };
     if (top) add(top, 0, tree);
     if (!tree.children.length) tree.innerHTML = `<div class="hint" style="padding:14px">No parts in this file.</div>`;
@@ -633,7 +700,7 @@
   }
   function setVisible(ids, on) {
     ids.forEach((i) => { meshes[i].visible = on; });
-    if (selectedMesh && !selectedMesh.visible) { clearSelection(); showHint(); }
+    if (selected.some((m) => !m.visible)) { clearSelection(); showHint(); }
     syncChecks(); requestRender();
   }
   $("tree").addEventListener("click", (e) => {
@@ -644,6 +711,11 @@
       e.preventDefault();
       meshes.forEach((m, i) => { m.visible = ids.includes(i); });
       syncChecks(); frame(); closeDrawer(); return;
+    }
+    if (row.tagName === "SUMMARY") {
+      if (mode !== "part") document.querySelector('.mode[data-mode="part"]').click();
+      selectGroup(ids, row.querySelector(".nm").textContent, row);
+      return; // the summary still opens/closes its list
     }
     if (row.dataset.mesh !== undefined) {
       const m = meshes[+row.dataset.mesh];
