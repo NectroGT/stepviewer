@@ -430,7 +430,18 @@
   }
 
   // ---------- readouts ----------
-  function setReadout(html) { readout.innerHTML = html; readout.hidden = !html; }
+  let detailsOpen = store.get("details", "0") === "1";
+  function setReadout(html) {
+    readout.innerHTML = html; readout.hidden = !html;
+    const more = readout.querySelector("[data-more]");
+    if (more && !readout.querySelector(".kv")) more.remove();
+    syncDetails();
+  }
+  function syncDetails() {
+    readout.classList.toggle("open", detailsOpen);
+    const more = readout.querySelector("[data-more]");
+    if (more) { more.setAttribute("aria-expanded", String(detailsOpen)); more.textContent = detailsOpen ? "Less" : "Details"; }
+  }
   function hintFor(m) {
     return {
       part: "Tap a part to see its size. Drag to turn, pinch to zoom, two fingers to pan.",
@@ -439,17 +450,19 @@
     }[m];
   }
   function showHint() { setReadout(`<div class="hint">${hintFor(mode)}</div>`); }
-  const head = (kind, name) => `<div class="head"><span class="kind">${kind}</span><span class="name">${esc(name)}</span><button class="x" aria-label="Clear" data-clear>×</button></div>`;
+  const head = (kind, name) => `<div class="head"><span class="kind">${kind}</span><span class="name">${esc(name)}</span><button class="more" type="button" data-more>Details</button><button class="x" aria-label="Clear" data-clear>×</button></div>`;
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-  readout.addEventListener("click", (e) => { if (e.target.closest("[data-clear]")) { clearSelection(); clearMarks(); showHint(); } });
+  readout.addEventListener("click", (e) => {
+    if (e.target.closest("[data-more]")) { detailsOpen = !detailsOpen; store.set("details", detailsOpen ? "1" : "0"); syncDetails(); return; }
+    if (e.target.closest("[data-clear]")) { clearSelection(); clearMarks(); showHint(); }
+  });
 
   function partReadout(mesh) {
     const s = mesh.geometry.boundingBox.getSize(new THREE.Vector3());
     const st = meshStats(mesh);
     setReadout(`${head("Part", mesh.userData.name)}
       <div class="big">${sizeStr(s)} <small>${unit}</small></div>
-      <dl class="kv"><dt>X · Y · Z</dt><dd>${num(s.x)} · ${num(s.y)} · ${num(s.z)}</dd>
-      <dt>Volume</dt><dd>${fmtVol(st.volume)}</dd><dt>Surface area</dt><dd>${fmtArea(st.area)}</dd>
+      <dl class="kv"><dt>Volume</dt><dd>${fmtVol(st.volume)}</dd><dt>Surface area</dt><dd>${fmtArea(st.area)}</dd>
       <dt>Faces</dt><dd>${mesh.userData.faces.length}</dd></dl>`);
   }
 
@@ -681,7 +694,20 @@
       busy(`<div class="err">Couldn't open ${esc(name)}.</div><div class="hint">${esc(err && err.message || err)}</div><button class="btn" data-dismiss>OK</button>`);
     }
   }
-  overlay.addEventListener("click", (e) => { if (e.target.closest("[data-dismiss]")) done(); });
+  overlay.addEventListener("click", (e) => {
+    if (e.target.closest("[data-open]")) $("fileInput").click();
+    if (e.target.closest("[data-dismiss]")) { if (meshes.length) done(); else showStart(); }
+  });
+
+  // first screen: nothing loaded yet
+  function showStart() {
+    setReadout("");
+    busy(`<div class="start-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M12 12l8-4.5M12 12v9M12 12L4 7.5"/></svg></div>
+      <h2 class="start-title">Open a STEP file</h2>
+      <div class="hint">Choose a .stp or .step file from your phone. IGES and BREP work too.</div>
+      <button class="btn primary start-btn" type="button" data-open>Choose file</button>
+      <div class="hint start-note">Your file is opened on this device and is never uploaded.</div>`);
+  }
 
   $("openBtn").addEventListener("click", () => $("fileInput").click());
   $("fileInput").addEventListener("change", async (e) => {
@@ -715,9 +741,7 @@
   applyTheme();
   resize();
   tick();
-  showHint();
-  // open a sample so the first screen shows the tool working
-  fetch("sample.stp").then((r) => { if (!r.ok) throw new Error(r.status); return r.arrayBuffer(); })
-    .then((b) => loadBuffer(b, "Sample — AS1 test assembly.stp"))
-    .catch(() => { done(); setReadout(`<div class="hint">Tap <b>Open</b> to choose a STEP file from your phone.</div>`); });
+  showStart();
+  // warm up the CAD engine in the background so the first file opens faster
+  getOcct().catch((err) => console.error(err));
 })();

@@ -119,18 +119,22 @@ button { font: inherit; color: inherit; }
 }
 
 .readout {
-  position: absolute; left: max(12px, env(safe-area-inset-left, 0px)); right: max(12px, env(safe-area-inset-right, 0px)); bottom: 12px;
+  position: absolute; left: max(12px, env(safe-area-inset-left, 0px)); right: max(12px, env(safe-area-inset-right, 0px)); bottom: 8px;
   max-width: 460px; margin-inline: auto;
-  background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow);
-  padding: 12px 14px; display: grid; gap: 8px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow);
+  padding: 8px 10px 9px 12px; display: grid; gap: 3px;
 }
-.readout .head { display: flex; align-items: baseline; gap: 8px; }
+.readout .head { display: flex; align-items: center; gap: 8px; min-height: 28px; }
 .readout .kind { font: 600 11px/1 var(--font-ui); letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
-.readout .name { flex: 1; min-width: 0; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.readout .name { flex: 1; min-width: 0; font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.readout .more { flex: none; border: 1px solid var(--line); background: var(--surface-2); color: var(--fg); border-radius: 6px; font-size: 12px; font-weight: 500; padding: 4px 8px; cursor: pointer; }
+.readout .more:focus-visible, .readout .x:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.readout:not(.open) .kv { display: none; }
+.readout .kv { margin-top: 4px; padding-top: 6px; border-top: 1px solid var(--line); }
 .readout .x { border: 0; background: none; color: var(--muted); font-size: 20px; line-height: 1; padding: 2px 4px; cursor: pointer; }
-.big { font: 500 24px/1.15 var(--font-num); font-variant-numeric: tabular-nums; }
-.big small { font-size: 14px; color: var(--muted); }
-.kv { display: grid; grid-template-columns: auto 1fr; gap: 3px 14px; font-size: 13px; }
+.big { font: 500 18px/1.2 var(--font-num); font-variant-numeric: tabular-nums; }
+.big small { font-size: 12px; color: var(--muted); }
+.kv { display: grid; grid-template-columns: auto 1fr; gap: 2px 14px; font-size: 12px; margin: 0; }
 .kv dt { color: var(--muted); }
 .kv dd { margin: 0; font-family: var(--font-num); font-variant-numeric: tabular-nums; text-align: right; }
 .hint { color: var(--muted); font-size: 13px; }
@@ -192,6 +196,11 @@ details[open] > summary .caret { transform: rotate(90deg); }
 @keyframes sp { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .spin { animation-duration: 3s; } }
 .err { color: var(--mark); font-weight: 500; }
+.start-icon { width: 48px; height: 48px; margin: 0 auto; display: grid; place-items: center; border-radius: 12px; background: var(--accent-soft); color: var(--accent); }
+.start-icon svg { width: 28px; height: 28px; }
+.start-title { margin: 4px 0 0; font: 600 20px/1.2 var(--font-head); text-wrap: balance; }
+.start-btn { justify-self: center; height: 44px; padding: 0 20px; font-size: 15px; margin-top: 4px; }
+.start-note { font-size: 12px; }
 .drop { outline: 3px dashed var(--accent); outline-offset: -8px; }
 </style>
 </head>
@@ -226,7 +235,7 @@ details[open] > summary .caret { transform: rotate(90deg); }
     <div class="label3d" id="label3d" hidden></div>
     <section class="readout" id="readout" aria-live="polite"></section>
     <div class="overlay" id="overlay">
-      <div class="card" id="overlayText"><div class="spin"></div><div>Starting the CAD engine…</div></div>
+      <div class="card" id="overlayText"><div class="spin"></div><div>Loading…</div></div>
     </div>
   </main>
 

@@ -17,4 +17,3 @@ measuring part sizes, hole diameters and distances.
 - `occt-import-js.js` / `.wasm`: [occt-import-js](https://github.com/kovacsv/occt-import-js) (Open CASCADE),
   LGPL-2.1 (`license.occt-import-js.txt`, `license.occt.txt`).
 - `fonts/`: IBM Plex, SIL Open Font License 1.1 (`fonts/OFL.txt`).
-- `sample.stp`: the public AS1 test assembly.
