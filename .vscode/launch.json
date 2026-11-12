@@ -1,0 +1,26 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "STEP: pick a file",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/view.py",
+            "python": "${workspaceFolder}/.venv/bin/python",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
+            "name": "STEP: open the file in the current tab",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/view.py",
+            "python": "${workspaceFolder}/.venv/bin/python",
+            "args": ["${file}"],
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        }
+    ]
+}
