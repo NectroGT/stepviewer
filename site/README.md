@@ -9,6 +9,8 @@ measuring part sizes, hole diameters and distances.
 - Every script, font and file the page uses is served from this site. No CDNs, analytics or trackers.
 - The page sets a Content Security Policy (`connect-src 'self'`, `img-src 'self' data: blob:`), so the
   browser refuses any attempt to send data to another server, even from tampered code.
+- Files are read in a background worker so the page stays responsive. The worker is started in a way
+  that makes it follow the same policy, so it can't connect anywhere else either.
 - The only thing stored is your mm/in choice, in your browser's local storage.
 
 ## Third-party code

@@ -91,10 +91,12 @@
     clearModel();
     res.meshes.forEach((om, i) => {
       const g = new THREE.BufferGeometry();
-      g.setAttribute("position", new THREE.Float32BufferAttribute(om.attributes.position.array, 3));
-      if (om.attributes.normal) g.setAttribute("normal", new THREE.Float32BufferAttribute(om.attributes.normal.array, 3));
+      const f32 = (a) => (a instanceof Float32Array ? a : new Float32Array(a)); // the worker already sends typed arrays
+      g.setAttribute("position", new THREE.BufferAttribute(f32(om.attributes.position.array), 3));
+      if (om.attributes.normal) g.setAttribute("normal", new THREE.BufferAttribute(f32(om.attributes.normal.array), 3));
       else g.computeVertexNormals();
-      g.setIndex(new THREE.Uint32BufferAttribute(Uint32Array.from(om.index.array), 1));
+      const ix = om.index.array;
+      g.setIndex(new THREE.BufferAttribute(ix instanceof Uint32Array ? ix : Uint32Array.from(ix), 1));
       g.computeBoundingBox(); g.computeBoundingSphere();
       const c = om.color || (om.brep_faces.find((f) => f.color) || {}).color || [0.72, 0.75, 0.79];
       const mat = new THREE.MeshStandardMaterial({
@@ -748,27 +750,74 @@
   $("scrim").addEventListener("click", closeDrawer);
 
   // ---------- loading files ----------
-  let occtPromise = null;
-  const getOcct = () => (occtPromise ||= occtimportjs({ locateFile: (p) => p }));
+  // The CAD engine runs in a Web Worker (worker.js) so the page keeps responding while a file
+  // is read. The worker is started from a blob: URL so it inherits this page's Content
+  // Security Policy. After each file it is replaced by a fresh one, which frees its memory.
+  const BASE = new URL(".", location.href).href;
+  let workerUrl = null, enginePromise = null, job = null, mainOcct = null;
+  function startEngine() {
+    workerUrl ||= fetch("worker.js").then((r) => { if (!r.ok) throw new Error(`worker.js: HTTP ${r.status}`); return r.text(); })
+      .then((src) => URL.createObjectURL(new Blob([src], { type: "text/javascript" })));
+    return workerUrl.then((url) => new Promise((resolve, reject) => {
+      const w = new Worker(url);
+      w.onmessage = (e) => { if (e.data.ready) resolve(w); else { w.terminate(); reject(new Error(e.data.initError)); } };
+      w.onerror = (e) => { e.preventDefault(); w.terminate(); reject(new Error(e.message || "The CAD engine didn't start.")); };
+      w.postMessage({ init: BASE });
+    }));
+  }
+  const engine = () => (enginePromise ||= startEngine());
+  function freshEngine() {
+    const old = enginePromise; enginePromise = null;
+    if (old) old.then((w) => w.terminate(), () => {});
+    engine().catch(() => {});
+  }
+  async function parse(ext, buf, params) {
+    let w;
+    try { w = await engine(); } catch (err) {
+      // no worker support: read on the main thread as before (the page pauses while it reads)
+      console.warn("CAD worker unavailable, reading on the main thread.", err);
+      const occt = await (mainOcct ||= occtimportjs({ locateFile: (p) => p }));
+      await nextPaint();
+      const data = new Uint8Array(buf);
+      return ext === "stp" || ext === "step" ? occt.ReadStepFile(data, params)
+        : ext === "igs" || ext === "iges" ? occt.ReadIgesFile(data, params) : occt.ReadBrepFile(data, params);
+    }
+    return new Promise((resolve, reject) => {
+      job = { w, reject };
+      w.onmessage = (e) => { job = null; e.data.error ? reject(new Error(e.data.error)) : resolve(e.data.res); };
+      w.onerror = (e) => { e.preventDefault(); job = null; reject(new Error("The CAD engine stopped. The file may be too large for this device.")); };
+      w.postMessage({ ext, buf, params }, [buf]);
+    });
+  }
+  function cancelLoad() {
+    if (!job) return false;
+    const j = job; job = null;
+    enginePromise = null; j.w.terminate(); engine().catch(() => {});
+    j.reject(Object.assign(new Error("Cancelled"), { cancelled: true }));
+    return true;
+  }
+
   function busy(text) { $("overlayText").innerHTML = text; overlay.hidden = false; }
   function done() { overlay.hidden = true; }
   const nextPaint = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
 
+  let loadSeq = 0;
   async function loadBuffer(buf, name) {
+    cancelLoad(); // a new file replaces one still being read
+    const my = ++loadSeq;
     const ext = name.toLowerCase().split(".").pop();
     if (!["stp", "step", "igs", "iges", "brep", "brp"].includes(ext)) {
       busy(`<div class="err">${esc(name)} isn't a STEP file.</div><div class="hint">Pick a .stp or .step file. IGES and BREP work too.</div><button class="btn" data-dismiss>OK</button>`);
       return;
     }
-    busy(`<div class="spin"></div><div>Reading <b>${esc(name)}</b>…</div><div class="hint">${(buf.byteLength / 1048576).toFixed(1)} MB. Large assemblies can take a minute on a phone.</div>`);
+    busy(`<div class="spin"></div><div>Reading <b>${esc(name)}</b>…</div><div class="hint">${(buf.byteLength / 1048576).toFixed(1)} MB. Large assemblies can take a minute on a phone.</div><button class="btn" type="button" data-cancel>Cancel</button>`);
     await nextPaint();
     try {
-      const occt = await getOcct();
-      await nextPaint();
       const params = { linearUnit: "millimeter", linearDeflectionType: "bounding_box_ratio", linearDeflection: 0.0008, angularDeflection: 0.35 };
-      const data = new Uint8Array(buf);
-      const res = ext === "stp" || ext === "step" ? occt.ReadStepFile(data, params)
-        : ext === "igs" || ext === "iges" ? occt.ReadIgesFile(data, params) : occt.ReadBrepFile(data, params);
+      let res;
+      try { res = await parse(ext, buf, params); } catch (err) { if (!err.cancelled) freshEngine(); throw err; }
+      if (my !== loadSeq) return;
+      freshEngine();
       if (!res || !res.success || !res.meshes.length) throw new Error("The file opened but has no solid geometry in it.");
       buildModel(res);
       $("fileName").textContent = name;
@@ -777,12 +826,15 @@
       showHint();
       done();
     } catch (err) {
+      if (my !== loadSeq) return;
+      if (err && err.cancelled) { if (meshes.length) done(); else showStart(); return; }
       console.error(err);
       busy(`<div class="err">Couldn't open ${esc(name)}.</div><div class="hint">${esc(err && err.message || err)}</div><button class="btn" data-dismiss>OK</button>`);
     }
   }
   overlay.addEventListener("click", (e) => {
     if (e.target.closest("[data-open]")) $("fileInput").click();
+    if (e.target.closest("[data-cancel]")) cancelLoad();
     if (e.target.closest("[data-dismiss]")) { if (meshes.length) done(); else showStart(); }
   });
 
@@ -830,5 +882,5 @@
   tick();
   showStart();
   // warm up the CAD engine in the background so the first file opens faster
-  getOcct().catch((err) => console.error(err));
+  engine().catch((err) => console.warn(err));
 })();
