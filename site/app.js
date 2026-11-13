@@ -614,6 +614,7 @@
   $("unitBtn").addEventListener("click", () => {
     unit = unit === "mm" ? "in" : "mm"; store.set("unit", unit); $("unitBtn").textContent = unit;
     showOverallChip();
+    relabelDims();
     if (mode === "dist" && picks.length) distReadout();
     else if (selectedGroup) groupReadout(selectedGroup);
     else if (selected.length) partReadout(selected[0]);
@@ -675,12 +676,11 @@
       ordered.forEach((g) => {
         if (g.length < 2) { parent.appendChild(makeRow(meshes[g[0]].userData.name, g, depth, false, g[0])); return; }
         const names = new Set(g.map((i) => meshes[i].userData.name));
-        const d = meshes[g[0]].geometry.boundingBox.getSize(new THREE.Vector3()).toArray().sort((a, b) => b - a)
-          .map((v) => (v >= 100 ? v.toFixed(0) : v.toFixed(1))).join(" × ");
-        const nm = names.size === 1 ? [...names][0] : `${d} mm`;
+        const nm = names.size === 1 ? [...names][0] : dimsLabel(g[0]);
         const det = document.createElement("details");
         const row = makeRow(nm, g, depth, true);
         row.classList.add("grp");
+        if (names.size !== 1) row.dataset.dims = g[0]; // label is a size, so it follows the unit setting
         row.querySelector(".ct").textContent = "×" + g.length;
         det.appendChild(row);
         g.forEach((mi) => det.appendChild(makeRow(meshes[mi].userData.name, [mi], depth + 1, false, mi)));
@@ -689,6 +689,21 @@
     };
     if (top) add(top, 0, tree);
     if (!tree.children.length) tree.innerHTML = `<div class="hint" style="padding:14px">No parts in this file.</div>`;
+  }
+  // e.g. "120 × 40.5 × 6.0 mm" or "4.72 × 1.59 × 0.24 in", largest first
+  function dimsLabel(mi) {
+    const big = unit === "in" ? 10 : 100;
+    return meshes[mi].geometry.boundingBox.getSize(new THREE.Vector3()).toArray()
+      .map((v) => (unit === "in" ? v / 25.4 : v)).sort((a, b) => b - a)
+      .map((v) => v.toFixed(v >= big ? (unit === "in" ? 1 : 0) : (unit === "in" ? 2 : 1))).join(" × ") + " " + unit;
+  }
+  function relabelDims() {
+    document.querySelectorAll(".tree .row[data-dims]").forEach((row) => {
+      const nm = dimsLabel(+row.dataset.dims), el = row.querySelector(".nm");
+      if (selectedGroup && selectedGroup.name === el.textContent) selectedGroup.name = nm;
+      el.textContent = nm;
+      row.querySelector("input").setAttribute("aria-label", `Show ${nm}`);
+    });
   }
   function syncChecks() {
     document.querySelectorAll(".tree .row").forEach((row) => {
