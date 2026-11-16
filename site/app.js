@@ -106,11 +106,17 @@
       const g = new THREE.BufferGeometry();
       const f32 = (a) => (a instanceof Float32Array ? a : new Float32Array(a)); // the worker already sends typed arrays
       g.setAttribute("position", new THREE.BufferAttribute(f32(om.attributes.position.array), 3));
-      if (om.attributes.normal) g.setAttribute("normal", new THREE.BufferAttribute(f32(om.attributes.normal.array), 3));
-      else g.computeVertexNormals();
       const ix = om.index.array;
       g.setIndex(new THREE.BufferAttribute(ix instanceof Uint32Array ? ix : Uint32Array.from(ix), 1));
-      g.computeBoundingBox(); g.computeBoundingSphere();
+      if (om.attributes.normal) g.setAttribute("normal", new THREE.BufferAttribute(f32(om.attributes.normal.array), 3));
+      else g.computeVertexNormals();
+      // The worker sends bounds, volume/area and outline edges ready-made (om.prep), so the page
+      // doesn't freeze working them out. Without a worker they're computed here as before.
+      const pr = om.prep;
+      if (pr) {
+        g.boundingBox = new THREE.Box3(new THREE.Vector3(pr.box[0], pr.box[1], pr.box[2]), new THREE.Vector3(pr.box[3], pr.box[4], pr.box[5]));
+        g.boundingSphere = new THREE.Sphere(new THREE.Vector3(pr.sphere[0], pr.sphere[1], pr.sphere[2]), pr.sphere[3]);
+      } else { g.computeBoundingBox(); g.computeBoundingSphere(); }
       const c = om.color || (om.brep_faces.find((f) => f.color) || {}).color || [0.72, 0.75, 0.79];
       const mat = new THREE.MeshStandardMaterial({
         color: new THREE.Color(c[0], c[1], c[2]), metalness: 0.15, roughness: 0.6, side: THREE.DoubleSide,
@@ -118,7 +124,14 @@
       });
       const mesh = new THREE.Mesh(g, mat);
       mesh.userData = { index: i, name: om.name || `Body ${i + 1}`, faces: om.brep_faces, faceCache: new Map() };
-      const edges = new THREE.LineSegments(new THREE.EdgesGeometry(g, 30), edgeMat);
+      if (pr) mesh.userData.stats = { volume: pr.volume, area: pr.area }; // read by meshStats()
+      let eg;
+      if (pr) {
+        eg = new THREE.BufferGeometry(); eg.setAttribute("position", new THREE.BufferAttribute(pr.edges, 3));
+        eg.boundingSphere = g.boundingSphere.clone(); // edges lie on the part, so its sphere covers them
+      }
+      else eg = new THREE.EdgesGeometry(g, 30);
+      const edges = new THREE.LineSegments(eg, edgeMat);
       edges.raycast = () => {};
       mesh.add(edges);
       doc.group.add(mesh);
