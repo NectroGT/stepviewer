@@ -127,6 +127,8 @@
       const mesh = new THREE.Mesh(g, mat);
       mesh.userData = { index: i, name: om.name || `Body ${i + 1}`, faces: om.brep_faces, faceCache: new Map() };
       if (pr) mesh.userData.stats = { volume: pr.volume, area: pr.area }; // read by meshStats()
+      // handedness, so mirror-image parts aren't listed as identical copies (shape.js)
+      mesh.userData.chir = pr && pr.chir ? pr.chir : self.shapeChirality(g.attributes.position.array, g.index.array);
       let eg;
       if (pr) {
         eg = new THREE.BufferGeometry(); eg.setAttribute("position", new THREE.BufferAttribute(pr.edges, 3));
@@ -722,12 +724,13 @@
     groupReadout(selectedGroup);
   }
 
-  // Bodies with the same triangle count, the same dimensions (in any orientation) and the
-  // same volume are treated as identical copies, e.g. the teeth on a comb or repeated bolts.
+  // Bodies with the same triangle count, the same dimensions (in any orientation), the same
+  // volume and the same handedness are treated as identical copies, e.g. the teeth on a comb or
+  // repeated bolts. Handedness keeps a left-hand part apart from its mirror-image right-hand one.
   function sigOf(mesh) {
     if (mesh.userData.sig) return mesh.userData.sig;
     const d = mesh.geometry.boundingBox.getSize(new THREE.Vector3()).toArray().map((v) => v.toFixed(2)).sort();
-    return (mesh.userData.sig = `${mesh.geometry.index.count}|${d.join("x")}|${meshStats(mesh).volume.toPrecision(5)}`);
+    return (mesh.userData.sig = `${mesh.geometry.index.count}|${d.join("x")}|${meshStats(mesh).volume.toPrecision(5)}|${mesh.userData.chir || "?"}`);
   }
   const twinsOf = (mesh) => meshes.filter((m) => sigOf(m) === sigOf(mesh));
   function highlightFace(mesh, fis) {

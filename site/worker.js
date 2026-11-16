@@ -66,7 +66,7 @@ self.onmessage = async (e) => {
   const m = e.data;
   if (m.init) { // m.init is the site's base URL
     try {
-      importScripts(new URL("occt-import-js.js", m.init).href);
+      importScripts(new URL("occt-import-js.js", m.init).href, new URL("shape.js", m.init).href);
       occt = await occtimportjs({ locateFile: (p) => new URL(p, m.init).href });
       postMessage({ ready: true });
     } catch (err) {
@@ -87,7 +87,7 @@ self.onmessage = async (e) => {
       typed(om.index, Uint32Array);
       // heavy per-part work done here instead of on the page (which would freeze it)
       const P = om.attributes.position.array, I = om.index.array;
-      om.prep = { ...bounds(P), ...stats(P, I), edges: edges(P, I, 30) };
+      om.prep = { ...bounds(P), ...stats(P, I), edges: edges(P, I, 30), chir: self.shapeChirality(P, I) };
       transfer.push(om.prep.edges.buffer);
     });
     postMessage({ res }, transfer);
