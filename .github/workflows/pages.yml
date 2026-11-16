@@ -20,17 +20,25 @@ concurrency:
   group: pages
   cancel-in-progress: false
 
+# Two jobs: "build" packages site/ once, "deploy" publishes that package. If publishing fails,
+# "Re-run failed jobs" repeats only the deploy job and reuses the package. (With one job, a re-run
+# packages the site a second time and the publish step refuses to choose between the two copies.)
 jobs:
-  deploy:
+  build:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
       - id: deployment
         uses: actions/deploy-pages@v4
