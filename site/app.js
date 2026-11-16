@@ -686,6 +686,43 @@
     if (more && !readout.querySelector(".kv")) more.remove();
     syncDetails();
   }
+
+  // Movable panel: drag it (anywhere but its buttons) off the part you're looking at. It stays
+  // there, kept inside the 3D view, until the page is reloaded; double-tap it to put it back.
+  let rdx = 0, rdy = 0, rdrag = null, lastTap = 0, shownX = 0, shownY = 0; // shown = offset currently drawn
+  function clampReadout() {
+    if (readout.hidden || (!rdx && !rdy && !shownX && !shownY)) return;
+    const s = stage.getBoundingClientRect(), r = readout.getBoundingClientRect();
+    const bl = r.left - shownX, bt = r.top - shownY; // where it sits when not moved
+    rdx = Math.max(Math.min(rdx, s.right - 4 - (bl + r.width)), s.left + 4 - bl);
+    rdy = Math.max(Math.min(rdy, s.bottom - 4 - (bt + r.height)), s.top + 4 - bt);
+    shownX = rdx; shownY = rdy;
+    readout.style.transform = rdx || rdy ? `translate(${rdx}px, ${rdy}px)` : "";
+  }
+  readout.addEventListener("pointerdown", (e) => {
+    if (e.target.closest("button, a, input") || (e.pointerType === "mouse" && e.button !== 0)) return;
+    rdrag = { id: e.pointerId, x: e.clientX, y: e.clientY, dx: rdx, dy: rdy, moved: false };
+    readout.setPointerCapture(e.pointerId);
+  });
+  readout.addEventListener("pointermove", (e) => {
+    const d = rdrag; if (!d || d.id !== e.pointerId) return;
+    const mx = e.clientX - d.x, my = e.clientY - d.y;
+    if (!d.moved && Math.hypot(mx, my) < 5) return; // small wobble = still a tap
+    d.moved = true; readout.classList.add("dragging");
+    rdx = d.dx + mx; rdy = d.dy + my; clampReadout();
+  });
+  const endDrag = (e) => {
+    const d = rdrag; if (!d || d.id !== e.pointerId) return;
+    rdrag = null; readout.classList.remove("dragging");
+    if (d.moved || e.type === "pointercancel") return;
+    const now = performance.now();
+    if (now - lastTap < 350) { rdx = rdy = shownX = shownY = 0; readout.style.transform = ""; lastTap = 0; } // double-tap: back to the bottom
+    else lastTap = now;
+  };
+  readout.addEventListener("pointerup", endDrag);
+  readout.addEventListener("pointercancel", endDrag);
+  new ResizeObserver(clampReadout).observe(readout); // content changed size (e.g. Details opened)
+  new ResizeObserver(clampReadout).observe(stage);   // screen rotated or resized
   function syncDetails() {
     readout.classList.toggle("open", detailsOpen);
     const more = readout.querySelector("[data-more]");
@@ -1100,7 +1137,7 @@
   // first screen: nothing loaded yet
   function showStart() {
     setReadout("");
-    busy(`<div class="start-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M12 12l8-4.5M12 12v9M12 12L4 7.5"/></svg></div>
+    busy(`<img class="start-icon" src="icons/logo-160.png" alt="" width="80" height="80">
       <h2 class="start-title">Open a STEP file</h2>
       <div class="hint">Choose one or more .stp or .step files from your phone. Each opens in its own tab. IGES and BREP work too.</div>
       <button class="btn primary start-btn" type="button" data-open>Choose files</button>
