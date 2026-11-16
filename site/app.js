@@ -66,27 +66,6 @@
     selected.forEach((m) => m.material.emissive.copy(accentColor));
     requestRender();
   }
-  window.matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", applyTheme);
-  new MutationObserver(applyTheme).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
-
-  // theme button: Auto (follows the device) -> Light -> Dark
-  const THEMES = {
-    auto: { label: "Theme: automatic, follows your device", icon: '<circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 1 0 16z" fill="currentColor"/>' },
-    light: { label: "Theme: light", icon: '<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.5M12 19v2.5M2.5 12H5M19 12h2.5M5.3 5.3l1.8 1.8M16.9 16.9l1.8 1.8M5.3 18.7l1.8-1.8M16.9 7.1l1.8-1.8"/>' },
-    dark: { label: "Theme: dark", icon: '<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/>' },
-  };
-  const ORDER = ["auto", "light", "dark"];
-  let theme = store.get("theme", "auto"); if (!THEMES[theme]) theme = "auto";
-  function setTheme(t) {
-    theme = t; store.set("theme", t);
-    if (window.stepTheme) window.stepTheme.apply(t);
-    const b = $("themeBtn");
-    b.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${THEMES[t].icon}</svg>`;
-    b.title = THEMES[t].label;
-    b.setAttribute("aria-label", `${THEMES[t].label}. Tap to change.`);
-  }
-  $("themeBtn").addEventListener("click", () => setTheme(ORDER[(ORDER.indexOf(theme) + 1) % ORDER.length]));
-  setTheme(theme);
 
   // ---------- model state ----------
   // docs: one per open file (tab). `meshes` always points at the active file's meshes.

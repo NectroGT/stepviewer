@@ -8,9 +8,8 @@
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob:; connect-src 'self'; worker-src blob:; child-src blob:; manifest-src 'self'; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#171f28" media="(prefers-color-scheme: dark)">
-<script src="theme.js"></script>
+<meta name="theme-color" content="#ffffff">
+<meta name="color-scheme" content="light">
 <meta name="description" content="Open STEP files on your phone, browse the part tree, and measure part sizes, hole diameters and distances. Files stay on your device.">
 <title>Pocket STEP Viewer</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 2l9 5v10l-9 5-9-5V7z' fill='%231f5fd1'/%3E%3Cpath d='M12 12l9-5M12 12v10M12 12L3 7' stroke='%23fff' stroke-width='1.5' fill='none'/%3E%3C/svg%3E">
@@ -36,21 +35,6 @@
   --font-head: "IBM Plex Sans Condensed", "IBM Plex Sans", system-ui, sans-serif;
   --font-num: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
 }
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --bg: #0e1318; --surface: #171f28; --surface-2: #1d2631; --fg: #e5eaef; --muted: #8d9aa8;
-    --line: #2a3542; --accent: #5c9bff; --accent-fg: #0b1220; --accent-soft: #1b2b45;
-    --mark: #ff8a3d; --viewport: #131a22; --edge: #0a0e12; --shadow: 0 6px 24px rgba(0,0,0,.45);
-    color-scheme: dark;
-  }
-}
-:root[data-theme="dark"] {
-  --bg: #0e1318; --surface: #171f28; --surface-2: #1d2631; --fg: #e5eaef; --muted: #8d9aa8;
-  --line: #2a3542; --accent: #5c9bff; --accent-fg: #0b1220; --accent-soft: #1b2b45;
-  --mark: #ff8a3d; --viewport: #131a22; --edge: #0a0e12; --shadow: 0 6px 24px rgba(0,0,0,.45);
-  color-scheme: dark;
-}
-
 *, *::before, *::after { box-sizing: border-box; }
 [hidden] { display: none !important; }
 html, body { height: 100%; margin: 0; }
@@ -98,7 +82,6 @@ button { font: inherit; color: inherit; }
 .btn.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
 .btn:focus-visible, .mode:focus-visible, .row button:focus-visible, .views button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .btn svg { width: 18px; height: 18px; }
-.btn.icon { width: 38px; padding: 0; justify-content: center; }
 .unit { font-family: var(--font-num); min-width: 46px; justify-content: center; }
 
 /* open files, one tab each (shown once two or more are open) */
@@ -247,7 +230,6 @@ details[open] > summary .caret { transform: rotate(90deg); }
       <h1>Pocket STEP Viewer</h1>
       <span class="file" id="fileName">No file</span>
     </div>
-    <button class="btn icon" id="themeBtn" type="button" aria-label="Theme"></button>
     <button class="btn unit" id="unitBtn" aria-label="Switch units">mm</button>
     <button class="btn primary" id="openBtn" aria-label="Open STEP files">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V5h6l2 2h8v12z"/></svg>
