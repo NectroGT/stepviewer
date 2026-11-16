@@ -170,6 +170,32 @@ button { font: inherit; color: inherit; }
 .memwarn .mw-big { display: block; margin-top: 3px; font: 500 12px/1.3 var(--font-num); overflow-wrap: anywhere; }
 .memwarn .mw-x { flex: none; border: 0; background: none; color: inherit; font-size: 20px; line-height: 1; padding: 0 4px; cursor: pointer; }
 .memwarn .mw-x:focus-visible { outline: 2px solid var(--accent); border-radius: 4px; }
+/* weight line in the measurement panel */
+.readout .weight { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 14px; }
+.readout .weight b { font: 600 15px/1.2 var(--font-num); }
+.readout .weight select {
+  max-width: 100%; min-width: 0; height: 30px; border: 1px solid var(--line); border-radius: 6px; padding: 0 6px;
+  background: var(--surface-2); color: var(--fg); font: 500 13px var(--font-ui); cursor: pointer;
+}
+.readout .weight .dens { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; color: var(--muted); }
+.readout .weight input { width: 72px; height: 30px; border: 1px solid var(--line); border-radius: 6px; padding: 0 6px; background: var(--surface); color: var(--fg); font: 500 13px var(--font-num); }
+.readout .weight select:focus-visible, .readout .weight input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* cut plane controls: top of the 3D view, left of the view buttons */
+.cutbar {
+  position: absolute; top: 10px; left: max(12px, env(safe-area-inset-left, 0px)); right: 68px; max-width: 420px; z-index: 2;
+  display: flex; align-items: center; gap: 8px; padding: 6px 8px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow);
+}
+.cutbar .seg { display: flex; flex: none; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.cutbar .seg button, .cutbar #cutFlip {
+  width: 34px; height: 32px; border: 0; background: var(--surface-2); color: var(--fg); font: 600 13px/1 var(--font-num); cursor: pointer;
+}
+.cutbar .seg button + button { border-left: 1px solid var(--line); }
+.cutbar [aria-pressed="true"] { background: var(--accent); color: var(--accent-fg); }
+.cutbar #cutFlip { flex: none; border: 1px solid var(--line); border-radius: 8px; font-size: 16px; }
+.cutbar input[type="range"] { flex: 1; min-width: 0; accent-color: #c8553d; height: 32px; }
+.cutbar button:focus-visible, .cutbar input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.app.comparing .views [data-view="cut"] { opacity: .4; pointer-events: none; }
 .label3d {
   position: absolute; transform: translate(-50%, -130%); pointer-events: none;
   background: var(--mark); color: #fff; font: 500 13px/1 var(--font-num);
@@ -303,9 +329,17 @@ details[open] > summary .caret { transform: rotate(90deg); }
       <button data-view="right" aria-label="Right view">RGT</button>
       <div class="sep"></div>
       <button data-view="dims" aria-pressed="true" aria-label="Show overall dimensions">DIM</button>
+      <button data-view="cut" aria-pressed="false" aria-label="Cut through the model">CUT</button>
     </div>
     <div class="label3d" id="label3d" hidden></div>
     <div class="memwarn" id="memwarn" role="status" hidden></div>
+    <div class="cutbar" id="cutbar" hidden>
+      <div class="seg" role="group" aria-label="Cut direction">
+        <button type="button" data-axis="x">X</button><button type="button" data-axis="y">Y</button><button type="button" data-axis="z">Z</button>
+      </div>
+      <input type="range" id="cutPos" min="0" max="1000" value="500" aria-label="Cut position">
+      <button type="button" id="cutFlip" aria-label="Show the other side" title="Show the other side">⇄</button>
+    </div>
     <section class="readout" id="readout" aria-live="polite"></section>
     <div class="overlay" id="overlay">
       <div class="card" id="overlayText"><div class="spin"></div><div>Loading…</div></div>

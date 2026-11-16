@@ -200,6 +200,7 @@
   const visibleBox = (list) => { const b = new THREE.Box3(); list.forEach((m) => { if (m.visible) b.union(m.geometry.boundingBox); }); return b; };
   function enterCompare(b) {
     if (!active || !b || b === active) return;
+    if (cut.on) setCut(false);
     clearSelection(); clearMarks();
     if (cmp) scene.remove(cmp.b.group);
     cmp = { b }; b.group.visible = false; scene.add(b.group);
@@ -226,7 +227,8 @@
     setReadout(`${head("B vs A", `${active.name} ↔ ${cmp.b.name}`)}
       <div class="big cmpbig">${sa && sb ? ["x", "y", "z"].map((k) => `<span>Δ${k.toUpperCase()} ${delta(sa[k], sb[k])}</span>`).join("") + `<small>${unit}</small>` : "–"}</div>
       <dl class="kv">${rows}<dt>Parts shown</dt><dd>${count(meshes)} → ${count(cmp.b.meshes)}</dd>
-      <dt>Total volume</dt><dd>${fmtVol(vol(meshes))} → ${fmtVol(vol(cmp.b.meshes))}</dd></dl>`);
+      <dt>Total volume</dt><dd>${fmtVol(vol(meshes))} → ${fmtVol(vol(cmp.b.meshes))}</dd>
+      <dt>Weight, ${esc(materialName())}</dt><dd>${fmtWeight(vol(meshes))} → ${fmtWeight(vol(cmp.b.meshes))}</dd></dl>`);
   }
   function renderCompare() {
     const [pa, pb] = panes(), H = stage.clientHeight;
@@ -411,8 +413,66 @@
     if (v === "dims") {
       dimsOn = !dimsOn; store.set("dims", dimsOn ? "1" : "0");
       b.setAttribute("aria-pressed", String(dimsOn)); requestRender();
-    } else if (v === "fit") frame(); else frame(...VIEWS[v]);
+    } else if (v === "cut") { if (!cmp) setCut(!cut.on); }
+    else if (v === "fit") frame(); else frame(...VIEWS[v]);
   }));
+
+  // ---------- cut plane ----------
+  // A plane through the model along X, Y or Z. Model faces and outlines beyond it are clipped
+  // away; the inside walls you then look into are drawn flat in the section colour, so a cut
+  // part looks solid. The dimension lines are not cut.
+  renderer.localClippingEnabled = true;
+  const cut = { on: false, axis: store.get("cutAxis", "x"), t: 0.5, flip: false };
+  if (!["x", "y", "z"].includes(cut.axis)) cut.axis = "x";
+  const cutPlane = new THREE.Plane(), cutPlanes = [cutPlane];
+  const capMat = new THREE.MeshBasicMaterial({ color: 0xc8553d, side: THREE.BackSide, clippingPlanes: cutPlanes });
+  const cutOutline = new THREE.LineLoop(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: 0xc8553d, transparent: true, opacity: 0.8, depthTest: false }));
+  cutOutline.geometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array(12), 3));
+  cutOutline.visible = false; cutOutline.frustumCulled = false; cutOutline.renderOrder = 7;
+  scene.add(cutOutline);
+  function cutDoc(doc, on) {
+    doc.meshes.forEach((m) => {
+      m.material.clippingPlanes = on ? cutPlanes : null;
+      m.material.side = on ? THREE.FrontSide : THREE.DoubleSide; // back faces become the section fill
+      m.material.needsUpdate = true;
+      if (on && !m.userData.cap) { const c = new THREE.Mesh(m.geometry, capMat); c.raycast = () => {}; m.add(c); m.userData.cap = c; }
+      if (!on && m.userData.cap) { m.remove(m.userData.cap); m.userData.cap = null; }
+    });
+  }
+  function setCut(on) {
+    cut.on = on;
+    docs.forEach((d) => cutDoc(d, on));
+    edgeMat.clippingPlanes = on ? cutPlanes : null; edgeMat.needsUpdate = true;
+    if (faceOverlay) { faceOverlay.material.clippingPlanes = on ? cutPlanes : null; faceOverlay.material.needsUpdate = true; }
+    $("cutbar").hidden = !on; cutOutline.visible = on;
+    document.querySelector('.views [data-view="cut"]').setAttribute("aria-pressed", String(on));
+    syncCutBar(); requestRender();
+  }
+  function syncCutBar() {
+    document.querySelectorAll("#cutbar [data-axis]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.axis === cut.axis)));
+    $("cutPos").value = Math.round(cut.t * 1000);
+    $("cutFlip").setAttribute("aria-pressed", String(cut.flip));
+  }
+  function updateCut() { // place the plane and its outline for the shown parts (every render while on)
+    const box = visibleBox(meshes); if (box.isEmpty()) return;
+    const k = cut.axis, [a, b] = ["x", "y", "z"].filter((q) => q !== k);
+    const span = box.max[k] - box.min[k], pos = box.min[k] + span * cut.t;
+    const n = new THREE.Vector3(); n[k] = cut.flip ? 1 : -1; // keep the side the normal points to
+    cutPlane.normal.copy(n); cutPlane.constant = -n[k] * pos;
+    const pad = 0.04 * Math.max(span, box.max[a] - box.min[a], box.max[b] - box.min[b]);
+    const arr = cutOutline.geometry.attributes.position.array;
+    [[box.min[a] - pad, box.min[b] - pad], [box.max[a] + pad, box.min[b] - pad], [box.max[a] + pad, box.max[b] + pad], [box.min[a] - pad, box.max[b] + pad]]
+      .forEach(([u, v], i) => { const p = new THREE.Vector3(); p[k] = pos; p[a] = u; p[b] = v; p.toArray(arr, i * 3); });
+    cutOutline.geometry.attributes.position.needsUpdate = true;
+  }
+  $("cutbar").addEventListener("click", (e) => {
+    const ax = e.target.closest("[data-axis]");
+    if (ax) { cut.axis = ax.dataset.axis; store.set("cutAxis", cut.axis); }
+    else if (e.target.closest("#cutFlip")) cut.flip = !cut.flip;
+    else return;
+    syncCutBar(); requestRender();
+  });
+  $("cutPos").addEventListener("input", (e) => { cut.t = e.target.value / 1000; requestRender(); });
   document.querySelector('.views [data-view="dims"]').setAttribute("aria-pressed", String(dimsOn));
 
   // ---------- geometry helpers ----------
@@ -684,6 +744,7 @@
       polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2, depthWrite: false,
     }));
     faceOverlay.raycast = () => {};
+    if (cut.on) faceOverlay.material.clippingPlanes = cutPlanes;
     mesh.add(faceOverlay);
     requestRender();
   }
@@ -727,7 +788,7 @@
     readout.style.transform = rdx || rdy ? `translate(${rdx}px, ${rdy}px)` : "";
   }
   readout.addEventListener("pointerdown", (e) => {
-    if (e.target.closest("button, a, input") || (e.pointerType === "mouse" && e.button !== 0)) return;
+    if (e.target.closest("button, a, input, select, label") || (e.pointerType === "mouse" && e.button !== 0)) return;
     rdrag = { id: e.pointerId, x: e.clientX, y: e.clientY, dx: rdx, dy: rdy, moved: false };
     readout.setPointerCapture(e.pointerId);
   });
@@ -782,6 +843,7 @@
     const st = meshStats(mesh);
     setReadout(`${head("Part", mesh.userData.name)}
       <div class="big">${sizeStr(s)} <small>${unit}</small></div>
+      ${weightRow(st.volume)}
       <dl class="kv">${twinsOf(mesh).length > 1 ? `<dt>Identical in file</dt><dd><button class="link" type="button" data-twins="${mesh.userData.index}">Select all ${twinsOf(mesh).length}</button></dd>` : ""}<dt>Volume</dt><dd>${fmtVol(st.volume)}</dd><dt>Surface area</dt><dd>${fmtArea(st.area)}</dd>
       <dt>Faces</dt><dd>${mesh.userData.faces.length}</dd></dl>`);
   }
@@ -794,6 +856,7 @@
     const each = list[0].geometry.boundingBox.getSize(new THREE.Vector3());
     setReadout(`${head(same ? `${list.length} identical` : "Group", name)}
       <div class="big">${sizeStr(box.getSize(new THREE.Vector3()))} <small>${unit}</small></div>
+      ${weightRow(vol, "total")}
       <dl class="kv"><dt>Parts</dt><dd>${list.length}</dd>${same ? `<dt>Each part</dt><dd>${sizeStr(each)}</dd>` : ""}
       <dt>Total volume</dt><dd>${fmtVol(vol)}</dd></dl>`);
   }
@@ -856,7 +919,8 @@
     const r = renderer.domElement.getBoundingClientRect();
     const ndc = new THREE.Vector2(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1);
     raycaster.setFromCamera(ndc, camera);
-    const hit = raycaster.intersectObjects(meshes.filter((m) => m.visible), false)[0];
+    const hits = raycaster.intersectObjects(meshes.filter((m) => m.visible), false);
+    const hit = cut.on ? hits.find((h) => cutPlane.distanceToPoint(h.point) >= -1e-6) : hits[0]; // skip the cut-away part
     return hit ? { hit, ndc, rect: r } : null;
   }
   function snapPoint(res, clientX, clientY) {
@@ -910,12 +974,53 @@
   $("unitBtn").addEventListener("click", () => {
     unit = unit === "mm" ? "in" : "mm"; store.set("unit", unit); $("unitBtn").textContent = unit;
     relabelDims(); requestRender(); // dimension labels follow the unit
+    refreshReadout();
+  });
+  // re-draw whatever the panel is showing (after a unit or material change)
+  function refreshReadout() {
     if (cmp) compareReadout();
     else if (mode === "dist" && picks.length) distReadout();
     else if (selectedGroup) groupReadout(selectedGroup);
     else if (selected.length) partReadout(selected[0]);
     else if (faceOverlay && currentFace) faceReadout(...currentFace);
     else showHint();
+  }
+
+  // ---------- weight estimate ----------
+  // Weight = volume of the 3D model x the chosen material's density. One material for the whole
+  // file, remembered on the device. It's an estimate: it assumes solid parts.
+  const MATERIALS = [
+    ["steel", "Steel", 7.85], ["stainless", "Stainless steel", 8.0], ["aluminium", "Aluminium", 2.7],
+    ["cast-iron", "Cast iron", 7.2], ["brass", "Brass", 8.5], ["copper", "Copper", 8.96], ["titanium", "Titanium", 4.43],
+    ["abs", "ABS plastic", 1.04], ["pla", "PLA plastic", 1.24], ["nylon", "Nylon", 1.14], ["acetal", "Acetal (POM)", 1.41],
+    ["wood", "Wood (pine)", 0.5],
+  ];
+  let material = store.get("material", "steel");
+  if (material !== "custom" && !MATERIALS.some((m) => m[0] === material)) material = "steel";
+  let customDensity = parseFloat(store.get("density", "7.85")) || 7.85;
+  const density = () => (material === "custom" ? customDensity : MATERIALS.find((m) => m[0] === material)[2]);
+  const materialName = () => (material === "custom" ? `${customDensity} g/cm³` : MATERIALS.find((m) => m[0] === material)[1]);
+  function fmtWeight(mm3) {
+    const g = (mm3 / 1000) * density(); // mm³ -> cm³ -> grams
+    if (unit === "in") { const lb = g / 453.59237; return lb >= 1 ? lb.toFixed(lb >= 100 ? 1 : 2) + " lb" : (lb * 16).toFixed(2) + " oz"; }
+    return g >= 1000 ? (g / 1000).toFixed(g >= 100000 ? 1 : 2) + " kg" : g.toFixed(g >= 100 ? 0 : 1) + " g";
+  }
+  function weightRow(mm3, total) {
+    const opts = MATERIALS.map(([k, n, d]) => `<option value="${k}"${k === material ? " selected" : ""}>${n} · ${d} g/cm³</option>`).join("")
+      + `<option value="custom"${material === "custom" ? " selected" : ""}>Custom density…</option>`;
+    return `<div class="weight"><span>${total ? "Total ≈ " : "≈ "}<b>${fmtWeight(mm3)}</b></span>
+      <select data-material aria-label="Material for the weight">${opts}</select>
+      ${material === "custom" ? `<label class="dens"><input data-density type="number" inputmode="decimal" min="0.01" step="0.01" value="${customDensity}" aria-label="Density"> g/cm³</label>` : ""}</div>`;
+  }
+  readout.addEventListener("change", (e) => {
+    if (e.target.matches("[data-material]")) {
+      material = e.target.value; store.set("material", material); refreshReadout();
+      if (material === "custom") readout.querySelector("[data-density]")?.focus();
+    } else if (e.target.matches("[data-density]")) {
+      const v = parseFloat(e.target.value);
+      if (v > 0) { customDensity = v; store.set("density", String(v)); }
+      refreshReadout();
+    }
   });
 
   // ---------- parts tree ----------
@@ -1137,6 +1242,7 @@
         freshEngine();
         if (!res || !res.success || !res.meshes.length) throw new Error("The file opened but has no solid geometry in it.");
         const doc = buildDoc(res, f);
+        if (cut.on) cutDoc(doc, true);
         docs.push(doc); opened.push(doc);
       } catch (err) {
         if (my !== loadSeq) return;
@@ -1199,6 +1305,7 @@
       renderer.setViewport(0, 0, W, H);
       dimLabelsB.forEach((l) => (l.hidden = true));
       drawDims(meshes, camera, { x: 0, y: 0, w: W, h: H }, dimLabels);
+      if (cut.on) updateCut();
       renderer.render(scene, camera);
     }
     if (labelPos && !label3d.hidden) {
