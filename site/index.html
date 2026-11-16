@@ -113,6 +113,25 @@ button { font: inherit; color: inherit; }
 }
 .tab.on .tn { color: var(--accent); }
 .tab .tx { flex: none; width: 32px; height: 100%; border: 0; background: none; color: var(--muted); font-size: 18px; line-height: 1; cursor: pointer; }
+.tab .ab { color: var(--accent); margin-right: 6px; font-weight: 700; }
+.tab.onb { border-color: var(--accent); border-style: dashed; }
+.tabs .cmp {
+  position: sticky; right: 0; flex: none; height: 36px; padding: 0 12px; margin-left: auto;
+  border: 1px solid var(--accent); border-radius: 8px; background: var(--surface); color: var(--accent);
+  font: 600 13px/1 var(--font-ui); cursor: pointer; box-shadow: -10px 0 10px var(--surface);
+}
+.tabs .cmp[aria-pressed="true"] { background: var(--accent); color: var(--accent-fg); }
+.tabs .cmp:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* compare: two panes, each labelled with its file */
+.panename {
+  position: absolute; pointer-events: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 6px; box-shadow: var(--shadow);
+  font: 500 12px/1 var(--font-num); padding: 5px 8px; color: var(--fg);
+}
+.panename b { color: var(--accent); margin-right: 6px; }
+.panediv { position: absolute; background: var(--accent); opacity: .5; pointer-events: none; }
+.app.comparing .modes { opacity: .4; pointer-events: none; }
+.readout .cmpbig { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: baseline; font-size: 16px; }
 .tab button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 6px; }
 
 /* viewport */

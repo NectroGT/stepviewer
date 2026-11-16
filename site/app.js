@@ -48,8 +48,10 @@
   function resize() {
     const w = stage.clientWidth, h = stage.clientHeight;
     renderer.setSize(w, h, false);
-    camera.aspect = w / Math.max(h, 1);
+    const p = panes()[0]; // whole stage, or one half while comparing
+    camera.aspect = p.w / Math.max(p.h, 1);
     camera.updateProjectionMatrix();
+    layoutPanes();
     requestRender();
   }
   new ResizeObserver(resize).observe(stage);
@@ -140,9 +142,90 @@
     return doc;
   }
 
+  // ---------- compare (two files side by side) ----------
+  // While comparing, the canvas is split in two: the active tab (A) and another tab (B). Both
+  // use the same view: camB copies the main camera's angle and zoom but centres on B's own model,
+  // so two files placed at different coordinates still line up. Viewing only: tapping parts and
+  // the Part/Face/Distance modes are off until compare ends.
+  let cmp = null, lastActive = null; // cmp = { b: doc }
+  const camB = new THREE.PerspectiveCamera(35, 1, 0.1, 1e6);
+  function panes() {
+    const W = stage.clientWidth, H = stage.clientHeight;
+    if (!cmp) return [{ x: 0, y: 0, w: W, h: H }];
+    if (H > W) { const h = Math.floor(H / 2); return [{ x: 0, y: 0, w: W, h }, { x: 0, y: h, w: W, h: H - h }]; } // phone upright: top / bottom
+    const w = Math.floor(W / 2); return [{ x: 0, y: 0, w, h: H }, { x: w, y: 0, w: W - w, h: H }];          // wide: left / right
+  }
+  const paneNames = [0, 1].map(() => { const el = document.createElement("div"); el.className = "panename"; el.hidden = true; return el; });
+  const paneDiv = document.createElement("div"); paneDiv.className = "panediv"; paneDiv.hidden = true;
+  renderer.domElement.after(paneDiv, ...paneNames);
+  function layoutPanes() {
+    const ps = panes();
+    paneDiv.hidden = !cmp; paneNames.forEach((el) => (el.hidden = !cmp));
+    if (!cmp) return;
+    [active, cmp.b].forEach((d, i) => {
+      const el = paneNames[i], p = ps[i];
+      el.innerHTML = `<b>${i ? "B" : "A"}</b>${esc(d.name)}`;
+      el.style.left = p.x + 12 + "px"; el.style.top = p.y + 10 + "px"; el.style.maxWidth = Math.max(p.w - 90, 80) + "px";
+    });
+    const b = ps[1];
+    Object.assign(paneDiv.style, b.x ? { left: b.x + "px", top: "0px", width: "1px", height: "100%" } : { left: "0px", top: b.y + "px", width: "100%", height: "1px" });
+  }
+  const visibleBox = (list) => { const b = new THREE.Box3(); list.forEach((m) => { if (m.visible) b.union(m.geometry.boundingBox); }); return b; };
+  function enterCompare(b) {
+    if (!active || !b || b === active) return;
+    clearSelection(); clearMarks();
+    if (cmp) scene.remove(cmp.b.group);
+    cmp = { b }; b.group.visible = false; scene.add(b.group);
+    document.querySelector(".app").classList.add("comparing");
+    resize(); frame(); compareReadout(); renderTabs();
+  }
+  function exitCompare() {
+    if (!cmp) return;
+    scene.remove(cmp.b.group); cmp.b.group.visible = true; active.group.visible = true;
+    cmp = null; renderer.setScissorTest(false);
+    document.querySelector(".app").classList.remove("comparing");
+    resize(); frame(); showHint(); renderTabs();
+  }
+  function compareReadout() {
+    if (!cmp) return;
+    const A = visibleBox(meshes), B = visibleBox(cmp.b.meshes);
+    const size = (bx) => (bx.isEmpty() ? null : bx.getSize(new THREE.Vector3()));
+    const sa = size(A), sb = size(B);
+    const delta = (a, b) => { const d = b - a; return Math.abs(d) < 5e-4 ? "same" : (d > 0 ? "+" : "−") + num(Math.abs(d)); };
+    const vol = (list) => list.reduce((t, m) => t + (m.visible ? meshStats(m).volume : 0), 0);
+    const count = (list) => list.filter((m) => m.visible).length;
+    const rows = !sa || !sb ? `<dt>Note</dt><dd>${!sa ? "A" : "B"} has no parts shown</dd>` : ["x", "y", "z"].map((k) =>
+      `<dt>${k.toUpperCase()}</dt><dd>${num(sa[k])} → ${num(sb[k])} (${delta(sa[k], sb[k])})</dd>`).join("");
+    setReadout(`${head("B vs A", `${active.name} ↔ ${cmp.b.name}`)}
+      <div class="big cmpbig">${sa && sb ? ["x", "y", "z"].map((k) => `<span>Δ${k.toUpperCase()} ${delta(sa[k], sb[k])}</span>`).join("") + `<small>${unit}</small>` : "–"}</div>
+      <dl class="kv">${rows}<dt>Parts shown</dt><dd>${count(meshes)} → ${count(cmp.b.meshes)}</dd>
+      <dt>Total volume</dt><dd>${fmtVol(vol(meshes))} → ${fmtVol(vol(cmp.b.meshes))}</dd></dl>`);
+  }
+  function renderCompare() {
+    const [pa, pb] = panes(), H = stage.clientHeight;
+    // camera B: same angle, zoom and pan as A, but around B's own centre
+    const ca = visibleBox(meshes).getCenter(new THREE.Vector3()), cbx = visibleBox(cmp.b.meshes);
+    const cb = cbx.isEmpty() ? ca : cbx.getCenter(new THREE.Vector3());
+    const tB = cb.clone().add(controls.target.clone().sub(ca));
+    camB.fov = camera.fov; camB.aspect = pb.w / Math.max(pb.h, 1); camB.near = camera.near; camB.far = camera.far;
+    camB.up.copy(camera.up); camB.position.copy(tB).add(camera.position.clone().sub(controls.target)); camB.lookAt(tB);
+    camB.updateProjectionMatrix(); camB.updateMatrixWorld(); // labels are placed before the render updates it
+    renderer.setScissorTest(true);
+    [[pa, camera, active, dimLabels], [pb, camB, cmp.b, dimLabelsB]].forEach(([p, cam, doc, labels]) => {
+      active.group.visible = doc === active; cmp.b.group.visible = doc === cmp.b;
+      drawDims(doc.meshes, cam, p, labels);
+      const y = H - p.y - p.h; renderer.setViewport(p.x, y, p.w, p.h); renderer.setScissor(p.x, y, p.w, p.h);
+      renderer.render(scene, cam);
+    });
+    renderer.setScissorTest(false);
+    active.group.visible = true; cmp.b.group.visible = false;
+  }
+
   // ---------- tabs ----------
   function activate(doc) {
     if (active === doc) return;
+    if (cmp) exitCompare();
+    lastActive = active;
     clearSelection(); clearMarks();
     if (active) {
       active.view = { pos: camera.position.clone(), target: controls.target.clone(), up: camera.up.clone(), near: camera.near, far: camera.far };
@@ -164,6 +247,7 @@
   }
   function closeDoc(doc) {
     const i = docs.indexOf(doc); if (i < 0) return;
+    if (cmp && (doc === active || doc === cmp.b)) exitCompare();
     if (active === doc) {
       clearSelection(); clearMarks();
       scene.remove(doc.group); doc.tree.remove();
@@ -180,13 +264,21 @@
   function renderTabs() {
     const el = $("tabs");
     el.hidden = docs.length < 2;
-    el.innerHTML = docs.map((d, i) => `<span class="tab${d === active ? " on" : ""}"><button class="tn" type="button" role="tab" aria-selected="${d === active}" data-tab="${i}" title="${esc(d.name)}">${esc(d.name)}</button><button class="tx" type="button" data-close="${i}" aria-label="Close ${esc(d.name)}">×</button></span>`).join("");
+    const ab = (d) => (!cmp ? "" : d === active ? '<b class="ab">A</b>' : d === cmp.b ? '<b class="ab">B</b>' : "");
+    el.innerHTML = docs.map((d, i) => `<span class="tab${d === active ? " on" : cmp && d === cmp.b ? " onb" : ""}"><button class="tn" type="button" role="tab" aria-selected="${d === active}" data-tab="${i}" title="${esc(d.name)}">${ab(d)}${esc(d.name)}</button><button class="tx" type="button" data-close="${i}" aria-label="Close ${esc(d.name)}">×</button></span>`).join("")
+      + (docs.length >= 2 ? `<button class="cmp" type="button" data-compare aria-pressed="${!!cmp}">${cmp ? "End compare" : "Compare"}</button>` : "");
     const on = el.querySelector(".on"); if (on && !el.hidden) on.scrollIntoView({ block: "nearest", inline: "nearest" });
   }
   $("tabs").addEventListener("click", (e) => {
-    const t = e.target.closest("[data-tab]"), x = e.target.closest("[data-close]");
-    if (t) activate(docs[+t.dataset.tab]);
-    else if (x) closeDoc(docs[+x.dataset.close]);
+    const t = e.target.closest("[data-tab]"), x = e.target.closest("[data-close]"), c = e.target.closest("[data-compare]");
+    if (c) {
+      if (cmp) exitCompare();
+      else enterCompare(lastActive && lastActive !== active && docs.includes(lastActive) ? lastActive : docs.find((d) => d !== active));
+    } else if (t) {
+      const d = docs[+t.dataset.tab];
+      if (!cmp) activate(d);
+      else if (d !== active && d !== cmp.b) enterCompare(d); // while comparing, a third tab replaces B
+    } else if (x) closeDoc(docs[+x.dataset.close]);
   });
 
   function updateModelBox(only) {
@@ -205,13 +297,19 @@
   const dimLines = new THREE.LineSegments(new THREE.BufferGeometry(), dimMat);
   dimLines.renderOrder = 8; dimLines.frustumCulled = false;
   scene.add(dimLines);
-  const dimLabels = ["X", "Y", "Z"].map(() => { const el = document.createElement("div"); el.className = "dimlabel"; el.hidden = true; return el; });
-  renderer.domElement.after(...dimLabels);
+  const makeLabels = () => ["X", "Y", "Z"].map(() => { const el = document.createElement("div"); el.className = "dimlabel"; el.hidden = true; return el; });
+  const dimLabels = makeLabels(), dimLabelsB = makeLabels(); // B: second pane while comparing
+  renderer.domElement.after(...dimLabels, ...dimLabelsB);
   const V3 = (x, y, z) => new THREE.Vector3(x, y, z);
-  const toScreen = (p) => { const q = p.clone().project(camera); return { x: (q.x + 1) / 2 * stage.clientWidth, y: (1 - q.y) / 2 * stage.clientHeight, behind: q.z > 1 }; };
-  function drawDims() {
+  // rect = the pane (in stage pixels) the camera draws into
+  const toScreen = (p, cam, rect) => { const q = p.clone().project(cam); return { x: rect.x + (q.x + 1) / 2 * rect.w, y: rect.y + (1 - q.y) / 2 * rect.h, behind: q.z > 1 }; };
+  const viewsEl = document.querySelector(".views");
+  const viewsBox = () => ({ left: viewsEl.offsetLeft, bottom: viewsEl.offsetTop + viewsEl.offsetHeight });
+  function drawDims(list, cam, rect, labels) {
     const box = new THREE.Box3();
-    if (dimsOn) meshes.forEach((m) => { if (m.visible) box.union(m.geometry.boundingBox); });
+    if (dimsOn) list.forEach((m) => { if (m.visible) box.union(m.geometry.boundingBox); });
+    const camera = cam, dimLabels = labels; // the code below draws for this pane
+    const toScr = (p) => toScreen(p, cam, rect);
     if (box.isEmpty()) { dimLines.visible = false; dimLabels.forEach((l) => (l.hidden = true)); return; }
     const mn = box.min, mx = box.max, c = box.getCenter(new THREE.Vector3()), size = box.getSize(new THREE.Vector3());
     const sx = camera.position.x >= c.x ? 1 : -1, sy = camera.position.y >= c.y ? 1 : -1;
@@ -228,7 +326,7 @@
     dims.forEach((d, i) => {
       const label = dimLabels[i];
       const A = d.a.clone().addScaledVector(d.off, gap), B = d.b.clone().addScaledVector(d.off, gap);
-      const M = A.clone().lerp(B, 0.5), sa = toScreen(A), sb = toScreen(B), mid = toScreen(M), out = toScreen(M.clone().addScaledVector(d.off, gap));
+      const M = A.clone().lerp(B, 0.5), sa = toScr(A), sb = toScr(B), mid = toScr(M), out = toScr(M.clone().addScaledVector(d.off, gap));
       if (d.len <= 0 || Math.hypot(sb.x - sa.x, sb.y - sa.y) < 28 || sa.behind || sb.behind) { label.hidden = true; return; }
       // extension lines (box edge out a little past the dimension line), the line, arrowheads
       seg(d.a, d.a.clone().addScaledVector(d.off, gap * 1.2));
@@ -247,8 +345,11 @@
       const push = Math.abs(ox) * label.offsetWidth / 2 + Math.abs(oy) * label.offsetHeight / 2 + 4;
       const hw = label.offsetWidth / 2 + 6, hh = label.offsetHeight / 2 + 6; // keep it on screen
       const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), Math.max(lo, hi));
-      label.style.left = clamp(mid.x + ox * push, hw, stage.clientWidth - hw) + "px";
-      label.style.top = clamp(mid.y + oy * push, hh, stage.clientHeight - hh) + "px";
+      const top = clamp(mid.y + oy * push, rect.y + hh, rect.y + rect.h - hh);
+      // stay clear of the FIT/ISO/... buttons on the right edge where the label is level with them
+      const vb = viewsBox(), rightEdge = rect.x + rect.w >= stage.clientWidth - 1 && top - hh < vb.bottom ? vb.left - 4 : rect.x + rect.w;
+      label.style.left = clamp(mid.x + ox * push, rect.x + hw, rightEdge - hw) + "px";
+      label.style.top = top + "px";
     });
     dimLines.geometry.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
     dimLines.visible = pos.length > 0;
@@ -257,11 +358,13 @@
   // ---------- camera views ----------
   function frame(dir, up) {
     updateModelBox();
+    let radius = modelRadius; // while comparing, leave room for the bigger of the two models
+    if (cmp) { const bb = visibleBox(cmp.b.meshes); if (!bb.isEmpty()) radius = Math.max(radius, bb.getBoundingSphere(new THREE.Sphere()).radius); }
     const center = modelBox.getCenter(new THREE.Vector3());
     const d = dir ? dir.clone().normalize() : camera.position.clone().sub(controls.target).normalize();
     const fov = THREE.MathUtils.degToRad(camera.fov);
     const fit = Math.min(fov, 2 * Math.atan(Math.tan(fov / 2) * camera.aspect));
-    const dist = modelRadius / Math.sin(fit / 2) * (dimsOn ? 1.5 : 1.05); // room for the dimension lines and labels
+    const dist = radius / Math.sin(fit / 2) * (dimsOn ? 1.5 : 1.05); // room for the dimension lines and labels
     camera.up.copy(up || new THREE.Vector3(0, 0, 1));
     camera.position.copy(center).addScaledVector(d, dist);
     camera.near = dist / 1000; camera.far = dist * 100;
@@ -600,7 +703,7 @@
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   readout.addEventListener("click", (e) => {
     if (e.target.closest("[data-more]")) { detailsOpen = !detailsOpen; store.set("details", detailsOpen ? "1" : "0"); syncDetails(); return; }
-    if (e.target.closest("[data-clear]")) { clearSelection(); clearMarks(); showHint(); }
+    if (e.target.closest("[data-clear]")) { if (cmp) { exitCompare(); return; } clearSelection(); clearMarks(); showHint(); }
     const tw = e.target.closest("[data-twins]");
     if (tw) {
       const m = meshes[+tw.dataset.twins], ids = twinsOf(m).map((x) => x.userData.index);
@@ -705,7 +808,7 @@
     return best || hit.point.clone();
   }
   function onTap(x, y) {
-    if (!meshes.length) return;
+    if (!meshes.length || cmp) return; // comparing is view-only
     const res = pick(x, y);
     if (!res) { if (mode !== "dist") { clearSelection(); showHint(); } return; }
     const mesh = res.hit.object, fi = faceIndexOf(mesh, res.hit.faceIndex);
@@ -743,7 +846,8 @@
   $("unitBtn").addEventListener("click", () => {
     unit = unit === "mm" ? "in" : "mm"; store.set("unit", unit); $("unitBtn").textContent = unit;
     relabelDims(); requestRender(); // dimension labels follow the unit
-    if (mode === "dist" && picks.length) distReadout();
+    if (cmp) compareReadout();
+    else if (mode === "dist" && picks.length) distReadout();
     else if (selectedGroup) groupReadout(selectedGroup);
     else if (selected.length) partReadout(selected[0]);
     else if (faceOverlay && currentFace) faceReadout(...currentFace);
@@ -839,6 +943,7 @@
       const cb = row.querySelector("input");
       cb.checked = vis === ids.length; cb.indeterminate = vis > 0 && vis < ids.length;
     });
+    if (cmp) compareReadout(); // shown parts changed
   }
   function setVisible(ids, on) {
     ids.forEach((i) => { meshes[i].visible = on; });
@@ -854,6 +959,7 @@
       meshes.forEach((m, i) => { m.visible = ids.includes(i); });
       syncChecks(); frame(); closeDrawer(); return;
     }
+    if (cmp) return; // comparing is view-only
     if (row.tagName === "SUMMARY") {
       if (mode !== "part") document.querySelector('.mode[data-mode="part"]').click();
       selectGroup(ids, row.querySelector(".nm").textContent, row);
@@ -1022,8 +1128,14 @@
     dirty = false;
     const s = camera.position.distanceTo(controls.target) * 0.006;
     markGroup.children.forEach((m) => { if (m.userData.dot) m.scale.setScalar(s); });
-    drawDims();
-    renderer.render(scene, camera);
+    if (cmp) renderCompare();
+    else {
+      const W = stage.clientWidth, H = stage.clientHeight;
+      renderer.setViewport(0, 0, W, H);
+      dimLabelsB.forEach((l) => (l.hidden = true));
+      drawDims(meshes, camera, { x: 0, y: 0, w: W, h: H }, dimLabels);
+      renderer.render(scene, camera);
+    }
     if (labelPos && !label3d.hidden) {
       const p = labelPos.clone().project(camera);
       label3d.style.left = ((p.x + 1) / 2 * stage.clientWidth) + "px";
