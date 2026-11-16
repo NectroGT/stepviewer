@@ -541,6 +541,7 @@
       const m = meshes[+tw.dataset.twins], ids = twinsOf(m).map((x) => x.userData.index);
       const grpRow = [...document.querySelectorAll(".tree .row.grp")].find((r) => r.dataset.ids === ids.join(","));
       selectGroup(ids, grpRow ? grpRow.querySelector(".nm").textContent : m.userData.name, grpRow);
+      if (drawerOpen()) revealSelected(true);
     }
   });
 
@@ -643,7 +644,7 @@
     const res = pick(x, y);
     if (!res) { if (mode !== "dist") { clearSelection(); showHint(); } return; }
     const mesh = res.hit.object, fi = faceIndexOf(mesh, res.hit.faceIndex);
-    if (mode === "part") { selectMesh(mesh); partReadout(mesh); return; }
+    if (mode === "part") { selectMesh(mesh); partReadout(mesh); if (drawerOpen()) revealSelected(true); return; }
     let f = fi >= 0 ? analyzeFace(mesh, fi) : null;
     if (f && f.type === "cyl") f = holeGroup(mesh, fi, f);
     if (mode === "face") { if (f) { highlightFace(mesh, f.faces || fi); currentFace = [mesh, f]; faceReadout(mesh, f); } return; }
@@ -803,7 +804,18 @@
   });
   $("showAll").addEventListener("click", () => { setVisible(meshes.map((_, i) => i), true); frame(); });
   $("hideAll").addEventListener("click", () => setVisible(meshes.map((_, i) => i), false));
-  const openDrawer = () => { $("drawer").classList.add("open"); $("scrim").hidden = false; };
+  // Show the selected part's row in the parts list: open the folded lists it sits in and
+  // scroll it to the middle. Used when the part was picked outside the list (3D view, links).
+  const drawerOpen = () => $("drawer").classList.contains("open");
+  function revealSelected(smooth) {
+    const row = $("tree").querySelector(".row.sel"); if (!row) return;
+    // a group's own row is its <summary>; only open the lists around it, not the group itself
+    let d = (row.tagName === "SUMMARY" ? row.parentElement.parentElement : row.parentElement).closest("details");
+    for (; d; d = d.parentElement.closest("details")) d.open = true;
+    const tree = $("tree"), r = row.getBoundingClientRect(), t = tree.getBoundingClientRect();
+    tree.scrollTo({ top: tree.scrollTop + (r.top - t.top) - (t.height - r.height) / 2, behavior: smooth ? "smooth" : "auto" });
+  }
+  const openDrawer = () => { $("drawer").classList.add("open"); $("scrim").hidden = false; revealSelected(false); };
   const closeDrawer = () => { $("drawer").classList.remove("open"); $("scrim").hidden = true; };
   $("partsBtn").addEventListener("click", openDrawer);
   $("closeDrawer").addEventListener("click", closeDrawer);
