@@ -11,7 +11,8 @@ measuring part sizes, hole diameters and distances.
   browser refuses any attempt to send data to another server, even from tampered code.
 - Files are read in a background worker so the page stays responsive. The worker is started in a way
   that makes it follow the same policy, so it can't connect anywhere else either.
-- The only thing stored is your mm/in choice, in your browser's local storage.
+- The only things stored are your display settings (mm/in, light/dark, dimension lines on/off,
+  details panel open/closed), in your browser's local storage. No file names or file contents are stored.
 
 ## Third-party code
 
