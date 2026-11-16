@@ -251,7 +251,7 @@ button { font: inherit; color: inherit; }
 .drawer {
   position: fixed; top: 0; bottom: 0; left: 0; width: min(88vw, 380px); z-index: 21;
   background: var(--surface); border-right: 1px solid var(--line); box-shadow: var(--shadow);
-  display: grid; grid-template-rows: auto auto 1fr;
+  display: grid; grid-template-rows: auto auto auto minmax(0, 1fr); /* header, tools, default material, parts list */
   padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px);
   padding-left: env(safe-area-inset-left, 0px);
   transform: translateX(-102%); transition: transform .22s ease;
@@ -275,6 +275,13 @@ button { font: inherit; color: inherit; }
 details[open] > summary .caret { transform: rotate(90deg); }
 .row .nm { flex: 1; min-width: 0; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .row .ct { font: 400 11px var(--font-num); color: var(--muted); }
+.row .mt { flex: none; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 11px/1.4 var(--font-ui); color: var(--accent); background: var(--accent-soft); border-radius: 4px; padding: 0 5px; }
+.row .mt:empty { display: none; }
+/* default material for the weight estimate, under Show all / Hide all */
+.drawer .defmat { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-bottom: 1px solid var(--line); font-size: 13px; color: var(--muted); }
+.drawer .defmat select { flex: 1; min-width: 0; height: 32px; border: 1px solid var(--line); border-radius: 6px; padding: 0 6px; background: var(--surface-2); color: var(--fg); font: 500 13px var(--font-ui); }
+.drawer .defmat input { width: 72px; height: 32px; border: 1px solid var(--line); border-radius: 6px; padding: 0 6px; background: var(--surface); color: var(--fg); font: 500 13px var(--font-num); }
+.drawer .defmat select:focus-visible, .drawer .defmat input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .row button { border: 1px solid var(--line); background: var(--surface-2); border-radius: 6px; font-size: 11px; padding: 4px 7px; cursor: pointer; color: var(--muted); }
 .row.asm .nm { font-weight: 600; }
 .row.grp .ct { color: var(--accent); font-weight: 500; }
@@ -371,6 +378,11 @@ details[open] > summary .caret { transform: rotate(90deg); }
   <div class="tools">
     <button class="btn" id="showAll">Show all</button>
     <button class="btn" id="hideAll">Hide all</button>
+  </div>
+  <div class="defmat">
+    <label for="defMat">Default material</label>
+    <select id="defMat"></select>
+    <input id="defDensity" type="number" inputmode="decimal" min="0.01" step="0.01" aria-label="Default density in g/cm³" hidden>
   </div>
   <div class="tree" id="tree"></div>
 </aside>

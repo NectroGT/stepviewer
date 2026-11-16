@@ -228,7 +228,7 @@
       <div class="big cmpbig">${sa && sb ? ["x", "y", "z"].map((k) => `<span>Δ${k.toUpperCase()} ${delta(sa[k], sb[k])}</span>`).join("") + `<small>${unit}</small>` : "–"}</div>
       <dl class="kv">${rows}<dt>Parts shown</dt><dd>${count(meshes)} → ${count(cmp.b.meshes)}</dd>
       <dt>Total volume</dt><dd>${fmtVol(vol(meshes))} → ${fmtVol(vol(cmp.b.meshes))}</dd>
-      <dt>Weight, ${esc(materialName())}</dt><dd>${fmtWeight(vol(meshes))} → ${fmtWeight(vol(cmp.b.meshes))}</dd></dl>`);
+      <dt>Weight</dt><dd>${fmtMass(gramsOf(meshes.filter((m) => m.visible)))} → ${fmtMass(gramsOf(cmp.b.meshes.filter((m) => m.visible)))}</dd></dl>`);
   }
   function renderCompare() {
     const [pa, pb] = panes(), H = stage.clientHeight;
@@ -264,7 +264,7 @@
     scene.add(doc.group);
     if (!doc.treeBuilt) { buildTree(doc.root, doc.tree); doc.treeBuilt = true; }
     $("tree").appendChild(doc.tree);
-    relabelDims(); syncChecks();
+    relabelDims(); syncChecks(); updateMatTags();
     $("fileName").textContent = doc.name;
     const v = doc.view;
     if (v) {
@@ -843,7 +843,7 @@
     const st = meshStats(mesh);
     setReadout(`${head("Part", mesh.userData.name)}
       <div class="big">${sizeStr(s)} <small>${unit}</small></div>
-      ${weightRow(st.volume)}
+      ${weightRow([mesh])}
       <dl class="kv">${twinsOf(mesh).length > 1 ? `<dt>Identical in file</dt><dd><button class="link" type="button" data-twins="${mesh.userData.index}">Select all ${twinsOf(mesh).length}</button></dd>` : ""}<dt>Volume</dt><dd>${fmtVol(st.volume)}</dd><dt>Surface area</dt><dd>${fmtArea(st.area)}</dd>
       <dt>Faces</dt><dd>${mesh.userData.faces.length}</dd></dl>`);
   }
@@ -856,7 +856,7 @@
     const each = list[0].geometry.boundingBox.getSize(new THREE.Vector3());
     setReadout(`${head(same ? `${list.length} identical` : "Group", name)}
       <div class="big">${sizeStr(box.getSize(new THREE.Vector3()))} <small>${unit}</small></div>
-      ${weightRow(vol, "total")}
+      ${weightRow(list, "total")}
       <dl class="kv"><dt>Parts</dt><dd>${list.length}</dd>${same ? `<dt>Each part</dt><dd>${sizeStr(each)}</dd>` : ""}
       <dt>Total volume</dt><dd>${fmtVol(vol)}</dd></dl>`);
   }
@@ -987,8 +987,9 @@
   }
 
   // ---------- weight estimate ----------
-  // Weight = volume of the 3D model x the chosen material's density. One material for the whole
-  // file, remembered on the device. It's an estimate: it assumes solid parts.
+  // Weight = volume of the 3D model x density. Each part uses its own material if one was chosen
+  // for it (mesh.userData.mat, kept until reload), otherwise the default material (chosen at the
+  // top of the Parts list, remembered on the device). It's an estimate: it assumes solid parts.
   const MATERIALS = [
     ["steel", "Steel", 7.85], ["stainless", "Stainless steel", 8.0], ["aluminium", "Aluminium", 2.7],
     ["cast-iron", "Cast iron", 7.2], ["brass", "Brass", 8.5], ["copper", "Copper", 8.96], ["titanium", "Titanium", 4.43],
@@ -1000,28 +1001,67 @@
   let customDensity = parseFloat(store.get("density", "7.85")) || 7.85;
   const density = () => (material === "custom" ? customDensity : MATERIALS.find((m) => m[0] === material)[2]);
   const materialName = () => (material === "custom" ? `${customDensity} g/cm³` : MATERIALS.find((m) => m[0] === material)[1]);
-  function fmtWeight(mm3) {
-    const g = (mm3 / 1000) * density(); // mm³ -> cm³ -> grams
+  const matByKey = (k) => MATERIALS.find((m) => m[0] === k);
+  const partDensity = (m) => { const o = m.userData.mat; return !o ? density() : o.key === "custom" ? o.density : matByKey(o.key)[2]; };
+  const partMatName = (m) => { const o = m.userData.mat; return !o ? null : o.key === "custom" ? `${o.density} g/cm³` : matByKey(o.key)[1]; };
+  const gramsOf = (list) => list.reduce((t, m) => t + (meshStats(m).volume / 1000) * partDensity(m), 0); // mm³ -> cm³ -> g
+  // what a set of parts is set to: "default" (none set), a material key, or "mixed"
+  const matOf = (m) => (m.userData.mat ? m.userData.mat.key + (m.userData.mat.key === "custom" ? ":" + m.userData.mat.density : "") : "default");
+  function matState(list) { const s = new Set(list.map(matOf)); return s.size === 1 ? [...s][0] : "mixed"; }
+  function fmtMass(g) {
     if (unit === "in") { const lb = g / 453.59237; return lb >= 1 ? lb.toFixed(lb >= 100 ? 1 : 2) + " lb" : (lb * 16).toFixed(2) + " oz"; }
     return g >= 1000 ? (g / 1000).toFixed(g >= 100000 ? 1 : 2) + " kg" : g.toFixed(g >= 100 ? 0 : 1) + " g";
   }
-  function weightRow(mm3, total) {
-    const opts = MATERIALS.map(([k, n, d]) => `<option value="${k}"${k === material ? " selected" : ""}>${n} · ${d} g/cm³</option>`).join("")
-      + `<option value="custom"${material === "custom" ? " selected" : ""}>Custom density…</option>`;
-    return `<div class="weight"><span>${total ? "Total ≈ " : "≈ "}<b>${fmtWeight(mm3)}</b></span>
-      <select data-material aria-label="Material for the weight">${opts}</select>
-      ${material === "custom" ? `<label class="dens"><input data-density type="number" inputmode="decimal" min="0.01" step="0.01" value="${customDensity}" aria-label="Density"> g/cm³</label>` : ""}</div>`;
+  const matOptions = (sel) => MATERIALS.map(([k, n, d]) => `<option value="${k}"${k === sel ? " selected" : ""}>${n} · ${d} g/cm³</option>`).join("")
+    + `<option value="custom"${sel === "custom" ? " selected" : ""}>Custom density…</option>`;
+  // weight line for one part or a group: total weight + a box that sets the material of those parts
+  function weightRow(list, total) {
+    const st = matState(list), key = st.split(":")[0];
+    const opts = `<option value="default"${st === "default" ? " selected" : ""}>Default (${esc(materialName())})</option>`
+      + (st === "mixed" ? `<option value="mixed" selected disabled>Mixed materials</option>` : "") + matOptions(key);
+    const dens = key === "custom" ? parseFloat(st.split(":")[1]) || customDensity : null;
+    const what = total ? `all ${list.length} parts` : "this part";
+    return `<div class="weight"><span>${total ? "Total ≈ " : "≈ "}<b>${fmtMass(gramsOf(list))}</b></span>
+      <select data-material aria-label="Material for ${what}" title="Material for ${what}">${opts}</select>
+      ${dens ? `<label class="dens"><input data-density type="number" inputmode="decimal" min="0.01" step="0.01" value="${dens}" aria-label="Density for ${what}"> g/cm³</label>` : ""}</div>`;
   }
   readout.addEventListener("change", (e) => {
+    const targets = selected; // the part, or all parts of the selected group
     if (e.target.matches("[data-material]")) {
-      material = e.target.value; store.set("material", material); refreshReadout();
-      if (material === "custom") readout.querySelector("[data-density]")?.focus();
+      const v = e.target.value;
+      targets.forEach((m) => { m.userData.mat = v === "default" ? null : v === "custom" ? { key: "custom", density: m.userData.mat?.density || customDensity } : { key: v }; });
+      refreshReadout(); updateMatTags();
+      if (v === "custom") readout.querySelector("[data-density]")?.focus();
     } else if (e.target.matches("[data-density]")) {
       const v = parseFloat(e.target.value);
-      if (v > 0) { customDensity = v; store.set("density", String(v)); }
-      refreshReadout();
+      if (v > 0) targets.forEach((m) => { m.userData.mat = { key: "custom", density: v }; });
+      refreshReadout(); updateMatTags();
     }
   });
+  // default material: top of the Parts list
+  function syncDefaultMat() {
+    $("defMat").innerHTML = matOptions(material);
+    $("defDensity").hidden = material !== "custom"; $("defDensity").value = customDensity;
+  }
+  $("defMat").addEventListener("change", (e) => {
+    material = e.target.value; store.set("material", material); syncDefaultMat(); refreshReadout();
+    if (material === "custom") $("defDensity").focus();
+  });
+  $("defDensity").addEventListener("change", (e) => {
+    const v = parseFloat(e.target.value);
+    if (v > 0) { customDensity = v; store.set("density", String(v)); }
+    syncDefaultMat(); refreshReadout();
+  });
+  syncDefaultMat();
+  // small material tag on rows whose parts have their own material
+  function updateMatTags() {
+    if (!active) return;
+    active.tree.querySelectorAll(".row").forEach((row) => {
+      const list = row.dataset.ids.split(",").map((i) => meshes[+i]), st = matState(list);
+      const tag = st === "default" ? "" : st === "mixed" ? (list.some((m) => m.userData.mat) ? "mixed" : "") : partMatName(list[0]);
+      const el = row.querySelector(".mt"); if (el.textContent !== tag) el.textContent = tag;
+    });
+  }
 
   // ---------- parts tree ----------
   function meshesUnder(node) {
@@ -1035,7 +1075,7 @@
     row.style.paddingLeft = (8 + depth * 14) + "px";
     row.dataset.ids = ids.join(",");
     if (meshIdx !== undefined) row.dataset.mesh = meshIdx;
-    row.innerHTML = `<span class="caret">${isAsm ? "▶" : ""}</span><input type="checkbox" checked aria-label="Show ${esc(name)}"><span class="nm">${esc(name)}</span>${isAsm ? `<span class="ct">${ids.length}</span>` : ""}<button type="button">Isolate</button>`;
+    row.innerHTML = `<span class="caret">${isAsm ? "▶" : ""}</span><input type="checkbox" checked aria-label="Show ${esc(name)}"><span class="nm">${esc(name)}</span><span class="mt"></span>${isAsm ? `<span class="ct">${ids.length}</span>` : ""}<button type="button">Isolate</button>`;
     return row;
   }
   function buildTree(root, tree) {

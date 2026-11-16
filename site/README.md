@@ -12,8 +12,9 @@ measuring part sizes, hole diameters and distances.
 - Files are read in a background worker so the page stays responsive. The worker is started in a way
   that makes it follow the same policy, so it can't connect anywhere else either.
 - The only things stored are your display settings (mm/in, light/dark, dimension lines on/off,
-  details panel open/closed, cut direction, and the material/density used for weight estimates), in your
-  browser's local storage. No file names or file contents are stored.
+  details panel open/closed, cut direction, and the default material/density used for weight estimates), in
+  your browser's local storage. No file names or file contents are stored. Materials chosen for single parts
+  are kept only until the page is reloaded.
 
 ## Third-party code
 
