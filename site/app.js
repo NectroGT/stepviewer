@@ -66,6 +66,25 @@
     selected.forEach((m) => m.material.emissive.copy(accentColor));
     requestRender();
   }
+  new MutationObserver(applyTheme).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+
+  // theme button: Light (default) <-> Dark; the icon shows the current mode
+  const THEMES = {
+    light: { label: "Light mode", icon: '<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.5M12 19v2.5M2.5 12H5M19 12h2.5M5.3 5.3l1.8 1.8M16.9 16.9l1.8 1.8M5.3 18.7l1.8-1.8M16.9 7.1l1.8-1.8"/>' },
+    dark: { label: "Dark mode", icon: '<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/>' },
+  };
+  const ORDER = ["light", "dark"];
+  let theme = store.get("theme", "light"); if (!THEMES[theme]) theme = "light"; // older saved "auto" becomes light
+  function setTheme(t) {
+    theme = t; store.set("theme", t);
+    if (window.stepTheme) window.stepTheme.apply(t);
+    const b = $("themeBtn");
+    b.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${THEMES[t].icon}</svg>`;
+    b.title = THEMES[t].label;
+    b.setAttribute("aria-label", `${THEMES[t].label}. Tap for ${t === "light" ? "dark" : "light"} mode.`);
+  }
+  $("themeBtn").addEventListener("click", () => setTheme(ORDER[(ORDER.indexOf(theme) + 1) % ORDER.length]));
+  setTheme(theme);
 
   // ---------- model state ----------
   // docs: one per open file (tab). `meshes` always points at the active file's meshes.
