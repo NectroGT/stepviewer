@@ -30,6 +30,7 @@
   --mark: #e0560b;        /* measurement marks */
   --viewport: #dde3e9;
   --edge: #2b3742;
+  --dim: #2f4a63;
   --shadow: 0 6px 24px rgba(22, 32, 42, .14);
   --font-ui: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-head: "IBM Plex Sans Condensed", "IBM Plex Sans", system-ui, sans-serif;
@@ -38,7 +39,7 @@
 :root[data-theme="dark"] {
   --bg: #0e1318; --surface: #171f28; --surface-2: #1d2631; --fg: #e5eaef; --muted: #8d9aa8;
   --line: #2a3542; --accent: #5c9bff; --accent-fg: #0b1220; --accent-soft: #1b2b45;
-  --mark: #ff8a3d; --viewport: #131a22; --edge: #0a0e12; --shadow: 0 6px 24px rgba(0,0,0,.45);
+  --mark: #ff8a3d; --viewport: #131a22; --edge: #0a0e12; --dim: #a9c1d8; --shadow: 0 6px 24px rgba(0,0,0,.45);
   color-scheme: dark;
 }
 
@@ -117,13 +118,6 @@ button { font: inherit; color: inherit; }
 /* viewport */
 .stage { position: relative; min-height: 0; background: var(--viewport); overflow: hidden; }
 .stage canvas { display: block; width: 100%; height: 100%; touch-action: none; }
-.chip {
-  position: absolute; top: 10px; left: max(12px, env(safe-area-inset-left, 0px));
-  max-width: calc(100% - 90px);
-  background: var(--surface); border: 1px solid var(--line); border-radius: 8px;
-  padding: 6px 10px; box-shadow: var(--shadow); font-size: 12px; color: var(--muted);
-}
-.chip b { display: block; font: 500 14px/1.3 var(--font-num); color: var(--fg); font-variant-numeric: tabular-nums; }
 .views {
   position: absolute; top: 10px; right: max(12px, env(safe-area-inset-right, 0px));
   display: flex; flex-direction: column; gap: 6px;
@@ -133,6 +127,16 @@ button { font: inherit; color: inherit; }
   background: var(--surface); box-shadow: var(--shadow); font: 500 11px/1 var(--font-num);
   letter-spacing: .04em; cursor: pointer;
 }
+.views button[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
+.views .sep { height: 4px; }
+/* overall size: one label per dimension line, placed by app.js */
+.dimlabel {
+  position: absolute; transform: translate(-50%, -50%); pointer-events: none;
+  background: var(--surface); color: var(--dim); border: 1px solid var(--dim);
+  font: 500 12px/1 var(--font-num); padding: 4px 6px; border-radius: 6px; white-space: nowrap;
+  font-variant-numeric: tabular-nums; box-shadow: var(--shadow);
+}
+.dimlabel b { font-weight: 600; margin-right: 4px; }
 .label3d {
   position: absolute; transform: translate(-50%, -130%); pointer-events: none;
   background: var(--mark); color: #fff; font: 500 13px/1 var(--font-num);
@@ -250,13 +254,14 @@ details[open] > summary .caret { transform: rotate(90deg); }
   <div class="tabs" id="tabs" role="tablist" aria-label="Open files" hidden></div>
 
   <main class="stage" id="stage">
-    <div class="chip" id="chip" hidden><span id="chipLabel">Overall size</span><b id="chipSize"></b></div>
     <div class="views">
       <button data-view="fit" aria-label="Fit model">FIT</button>
       <button data-view="iso" aria-label="Iso view">ISO</button>
       <button data-view="top" aria-label="Top view">TOP</button>
       <button data-view="front" aria-label="Front view">FRT</button>
       <button data-view="right" aria-label="Right view">RGT</button>
+      <div class="sep"></div>
+      <button data-view="dims" aria-pressed="true" aria-label="Show overall dimensions">DIM</button>
     </div>
     <div class="label3d" id="label3d" hidden></div>
     <section class="readout" id="readout" aria-live="polite"></section>

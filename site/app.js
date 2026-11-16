@@ -61,6 +61,7 @@
     edgeMat.color.set(v("--edge") || "#2b3742");
     markColor.set(v("--mark") || "#e0560b");
     accentColor.set(v("--accent") || "#1f5fd1");
+    dimMat.color.set(v("--dim") || "#2f4a63");
     markGroup.children.forEach((m) => m.material && m.material.color && m.material.color.copy(markColor));
     if (faceOverlay) faceOverlay.material.color.copy(accentColor);
     selected.forEach((m) => m.material.emissive.copy(accentColor));
@@ -140,7 +141,6 @@
     $("tree").appendChild(doc.tree);
     relabelDims(); syncChecks();
     $("fileName").textContent = doc.name;
-    showOverallChip();
     const v = doc.view;
     if (v) {
       camera.position.copy(v.pos); camera.up.copy(v.up); camera.near = v.near; camera.far = v.far;
@@ -160,7 +160,7 @@
     docs.splice(i, 1);
     if (!active) {
       if (docs.length) activate(docs[Math.min(i, docs.length - 1)]);
-      else { $("fileName").textContent = "No file"; $("chip").hidden = true; showStart(); }
+      else { $("fileName").textContent = "No file"; showStart(); }
     }
     renderTabs(); requestRender();
   }
@@ -183,14 +183,62 @@
     modelRadius = Math.max(modelBox.getBoundingSphere(new THREE.Sphere()).radius, 1);
   }
 
-  function showOverallChip() {
-    const all = new THREE.Box3();
-    meshes.forEach((m) => all.union(m.geometry.boundingBox));
-    if (all.isEmpty()) { $("chip").hidden = true; return; }
-    const s = all.getSize(new THREE.Vector3());
-    $("chipLabel").textContent = `Overall size, ${unit} · ${meshes.length} ${meshes.length === 1 ? "body" : "bodies"}`;
-    $("chipSize").textContent = sizeStr(s);
-    $("chip").hidden = false;
+  // ---------- overall dimensions ----------
+  // Dimension lines for the X, Y and Z size of the shown parts, drawn along the box edges on the
+  // side facing the camera (re-chosen as the view turns), with extension lines, arrowheads and a
+  // label each. A dimension seen end-on (e.g. Z from the top) is hidden.
+  let dimsOn = store.get("dims", "1") === "1";
+  const dimMat = new THREE.LineBasicMaterial({ color: 0x2f4a63, depthTest: false, transparent: true, opacity: 0.9 });
+  const dimLines = new THREE.LineSegments(new THREE.BufferGeometry(), dimMat);
+  dimLines.renderOrder = 8; dimLines.frustumCulled = false;
+  scene.add(dimLines);
+  const dimLabels = ["X", "Y", "Z"].map(() => { const el = document.createElement("div"); el.className = "dimlabel"; el.hidden = true; return el; });
+  renderer.domElement.after(...dimLabels);
+  const V3 = (x, y, z) => new THREE.Vector3(x, y, z);
+  const toScreen = (p) => { const q = p.clone().project(camera); return { x: (q.x + 1) / 2 * stage.clientWidth, y: (1 - q.y) / 2 * stage.clientHeight, behind: q.z > 1 }; };
+  function drawDims() {
+    const box = new THREE.Box3();
+    if (dimsOn) meshes.forEach((m) => { if (m.visible) box.union(m.geometry.boundingBox); });
+    if (box.isEmpty()) { dimLines.visible = false; dimLabels.forEach((l) => (l.hidden = true)); return; }
+    const mn = box.min, mx = box.max, c = box.getCenter(new THREE.Vector3()), size = box.getSize(new THREE.Vector3());
+    const sx = camera.position.x >= c.x ? 1 : -1, sy = camera.position.y >= c.y ? 1 : -1;
+    const X = sx > 0 ? mx.x : mn.x, Y = sy > 0 ? mx.y : mn.y, Yback = sy > 0 ? mn.y : mx.y;
+    const gap = Math.max(size.x, size.y, size.z) * 0.1;
+    const dims = [
+      // each line is pushed out diagonally from its edge, so it stands clear of the model in
+      // straight-on views too (e.g. X under the model in the front view)
+      { axis: "X", a: V3(mn.x, Y, mn.z), b: V3(mx.x, Y, mn.z), off: V3(0, sy, -1).normalize(), len: size.x },
+      { axis: "Y", a: V3(X, mn.y, mn.z), b: V3(X, mx.y, mn.z), off: V3(sx, 0, -1).normalize(), len: size.y },
+      { axis: "Z", a: V3(X, Yback, mn.z), b: V3(X, Yback, mx.z), off: V3(sx, -sy, 0).normalize(), len: size.z },
+    ];
+    const pos = [], seg = (p, q) => pos.push(p.x, p.y, p.z, q.x, q.y, q.z);
+    dims.forEach((d, i) => {
+      const label = dimLabels[i];
+      const A = d.a.clone().addScaledVector(d.off, gap), B = d.b.clone().addScaledVector(d.off, gap);
+      const M = A.clone().lerp(B, 0.5), sa = toScreen(A), sb = toScreen(B), mid = toScreen(M), out = toScreen(M.clone().addScaledVector(d.off, gap));
+      if (d.len <= 0 || Math.hypot(sb.x - sa.x, sb.y - sa.y) < 28 || sa.behind || sb.behind) { label.hidden = true; return; }
+      // extension lines (box edge out a little past the dimension line), the line, arrowheads
+      seg(d.a, d.a.clone().addScaledVector(d.off, gap * 1.2));
+      seg(d.b, d.b.clone().addScaledVector(d.off, gap * 1.2));
+      seg(A, B);
+      const dir = B.clone().sub(A).normalize(), h = Math.min(gap * 0.4, d.len * 0.2);
+      [[A, dir], [B, dir.clone().negate()]].forEach(([P, t]) => {
+        seg(P, P.clone().addScaledVector(t, h).addScaledVector(d.off, h * 0.35));
+        seg(P, P.clone().addScaledVector(t, h).addScaledVector(d.off, -h * 0.35));
+      });
+      const text = `<b>${d.axis}</b>${fmtLen(d.len, unit === "in" ? 3 : 2)}`;
+      if (label.dataset.t !== text) { label.innerHTML = text; label.dataset.t = text; }
+      // put the label beside the line, on the side away from the model
+      label.hidden = false;
+      let ox = out.x - mid.x, oy = out.y - mid.y; const ol = Math.hypot(ox, oy) || 1; ox /= ol; oy /= ol;
+      const push = Math.abs(ox) * label.offsetWidth / 2 + Math.abs(oy) * label.offsetHeight / 2 + 4;
+      const hw = label.offsetWidth / 2 + 6, hh = label.offsetHeight / 2 + 6; // keep it on screen
+      const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), Math.max(lo, hi));
+      label.style.left = clamp(mid.x + ox * push, hw, stage.clientWidth - hw) + "px";
+      label.style.top = clamp(mid.y + oy * push, hh, stage.clientHeight - hh) + "px";
+    });
+    dimLines.geometry.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    dimLines.visible = pos.length > 0;
   }
 
   // ---------- camera views ----------
@@ -200,7 +248,7 @@
     const d = dir ? dir.clone().normalize() : camera.position.clone().sub(controls.target).normalize();
     const fov = THREE.MathUtils.degToRad(camera.fov);
     const fit = Math.min(fov, 2 * Math.atan(Math.tan(fov / 2) * camera.aspect));
-    const dist = modelRadius / Math.sin(fit / 2) * 1.05;
+    const dist = modelRadius / Math.sin(fit / 2) * (dimsOn ? 1.5 : 1.05); // room for the dimension lines and labels
     camera.up.copy(up || new THREE.Vector3(0, 0, 1));
     camera.position.copy(center).addScaledVector(d, dist);
     camera.near = dist / 1000; camera.far = dist * 100;
@@ -217,8 +265,12 @@
   };
   document.querySelectorAll(".views button").forEach((b) => b.addEventListener("click", () => {
     const v = b.dataset.view;
-    if (v === "fit") frame(); else frame(...VIEWS[v]);
+    if (v === "dims") {
+      dimsOn = !dimsOn; store.set("dims", dimsOn ? "1" : "0");
+      b.setAttribute("aria-pressed", String(dimsOn)); requestRender();
+    } else if (v === "fit") frame(); else frame(...VIEWS[v]);
   }));
+  document.querySelector('.views [data-view="dims"]').setAttribute("aria-pressed", String(dimsOn));
 
   // ---------- geometry helpers ----------
   function faceIndexOf(mesh, tri) {
@@ -677,8 +729,7 @@
   $("unitBtn").textContent = unit;
   $("unitBtn").addEventListener("click", () => {
     unit = unit === "mm" ? "in" : "mm"; store.set("unit", unit); $("unitBtn").textContent = unit;
-    showOverallChip();
-    relabelDims();
+    relabelDims(); requestRender(); // dimension labels follow the unit
     if (mode === "dist" && picks.length) distReadout();
     else if (selectedGroup) groupReadout(selectedGroup);
     else if (selected.length) partReadout(selected[0]);
@@ -958,6 +1009,7 @@
     dirty = false;
     const s = camera.position.distanceTo(controls.target) * 0.006;
     markGroup.children.forEach((m) => { if (m.userData.dot) m.scale.setScalar(s); });
+    drawDims();
     renderer.render(scene, camera);
     if (labelPos && !label3d.hidden) {
       const p = labelPos.clone().project(camera);
