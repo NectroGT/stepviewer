@@ -10,6 +10,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#171f28" media="(prefers-color-scheme: dark)">
+<script src="theme.js"></script>
 <meta name="description" content="Open STEP files on your phone, browse the part tree, and measure part sizes, hole diameters and distances. Files stay on your device.">
 <title>Pocket STEP Viewer</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 2l9 5v10l-9 5-9-5V7z' fill='%231f5fd1'/%3E%3Cpath d='M12 12l9-5M12 12v10M12 12L3 7' stroke='%23fff' stroke-width='1.5' fill='none'/%3E%3C/svg%3E">
@@ -59,10 +60,16 @@ body {
   overflow: hidden; -webkit-tap-highlight-color: transparent;
 }
 .app {
-  height: 100%; height: 100dvh; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; grid-template-columns: minmax(0, 1fr);
+  height: 100%; height: 100dvh; display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; grid-template-columns: minmax(0, 1fr);
   width: 100%; overflow: hidden;
   padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px);
 }
+
+/* rows are pinned so the tab strip can be hidden without shifting the others */
+.bar { grid-row: 1; }
+.tabs { grid-row: 2; }
+.stage { grid-row: 3; }
+.modes { grid-row: 4; }
 
 /* header */
 .bar {
@@ -91,7 +98,30 @@ button { font: inherit; color: inherit; }
 .btn.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
 .btn:focus-visible, .mode:focus-visible, .row button:focus-visible, .views button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .btn svg { width: 18px; height: 18px; }
+.btn.icon { width: 38px; padding: 0; justify-content: center; }
 .unit { font-family: var(--font-num); min-width: 46px; justify-content: center; }
+
+/* open files, one tab each (shown once two or more are open) */
+.tabs {
+  display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none;
+  padding-block: 6px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  background: var(--surface); border-bottom: 1px solid var(--line);
+}
+.tabs::-webkit-scrollbar { display: none; }
+.tab {
+  flex: none; display: inline-flex; align-items: center; max-width: min(60vw, 260px); height: 36px;
+  border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2);
+}
+.tab.on { background: var(--accent-soft); border-color: var(--accent); }
+.tab .tn {
+  min-width: 0; height: 100%; padding: 0 2px 0 10px; border: 0; background: none; cursor: pointer;
+  font: 500 13px/1 var(--font-num); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.tab.on .tn { color: var(--accent); }
+.tab .tx { flex: none; width: 32px; height: 100%; border: 0; background: none; color: var(--muted); font-size: 18px; line-height: 1; cursor: pointer; }
+.tab button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 6px; }
 
 /* viewport */
 .stage { position: relative; min-height: 0; background: var(--viewport); overflow: hidden; }
@@ -217,13 +247,16 @@ details[open] > summary .caret { transform: rotate(90deg); }
       <h1>Pocket STEP Viewer</h1>
       <span class="file" id="fileName">No file</span>
     </div>
+    <button class="btn icon" id="themeBtn" type="button" aria-label="Theme"></button>
     <button class="btn unit" id="unitBtn" aria-label="Switch units">mm</button>
-    <button class="btn primary" id="openBtn" aria-label="Open a STEP file">
+    <button class="btn primary" id="openBtn" aria-label="Open STEP files">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V5h6l2 2h8v12z"/></svg>
       <span class="lbl">Open</span>
     </button>
-    <input type="file" id="fileInput" hidden>
+    <input type="file" id="fileInput" multiple hidden>
   </header>
+
+  <div class="tabs" id="tabs" role="tablist" aria-label="Open files" hidden></div>
 
   <main class="stage" id="stage">
     <div class="chip" id="chip" hidden><span id="chipLabel">Overall size</span><b id="chipSize"></b></div>

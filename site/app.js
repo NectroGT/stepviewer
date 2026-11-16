@@ -36,9 +36,8 @@
   controls.dampingFactor = 0.12;
   controls.screenSpacePanning = true;
 
-  const modelGroup = new THREE.Group();
-  const markGroup = new THREE.Group();
-  scene.add(modelGroup, markGroup);
+  const markGroup = new THREE.Group(); // each open file has its own group, added while its tab is active
+  scene.add(markGroup);
   let edgeMat = new THREE.LineBasicMaterial({ color: 0x2b3742, transparent: true, opacity: 0.55 });
   let markColor = new THREE.Color(0xe0560b), accentColor = new THREE.Color(0x1f5fd1);
 
@@ -70,7 +69,28 @@
   window.matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", applyTheme);
   new MutationObserver(applyTheme).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
 
+  // theme button: Auto (follows the device) -> Light -> Dark
+  const THEMES = {
+    auto: { label: "Theme: automatic, follows your device", icon: '<circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 1 0 16z" fill="currentColor"/>' },
+    light: { label: "Theme: light", icon: '<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.5M12 19v2.5M2.5 12H5M19 12h2.5M5.3 5.3l1.8 1.8M16.9 16.9l1.8 1.8M5.3 18.7l1.8-1.8M16.9 7.1l1.8-1.8"/>' },
+    dark: { label: "Theme: dark", icon: '<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/>' },
+  };
+  const ORDER = ["auto", "light", "dark"];
+  let theme = store.get("theme", "auto"); if (!THEMES[theme]) theme = "auto";
+  function setTheme(t) {
+    theme = t; store.set("theme", t);
+    if (window.stepTheme) window.stepTheme.apply(t);
+    const b = $("themeBtn");
+    b.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${THEMES[t].icon}</svg>`;
+    b.title = THEMES[t].label;
+    b.setAttribute("aria-label", `${THEMES[t].label}. Tap to change.`);
+  }
+  $("themeBtn").addEventListener("click", () => setTheme(ORDER[(ORDER.indexOf(theme) + 1) % ORDER.length]));
+  setTheme(theme);
+
   // ---------- model state ----------
+  // docs: one per open file (tab). `meshes` always points at the active file's meshes.
+  let docs = [], active = null;
   let meshes = [];          // THREE.Mesh per occt mesh
   let modelBox = new THREE.Box3();
   let modelRadius = 100;
@@ -80,15 +100,9 @@
   let currentFace = null;
   let measureLine = null, labelPos = null;
 
-  function clearModel() {
-    clearSelection(); clearMarks();
-    meshes.forEach((m) => { m.geometry.dispose(); m.material.dispose(); m.children.forEach((c) => c.geometry.dispose()); });
-    modelGroup.clear();
-    meshes = [];
-  }
-
-  function buildModel(res) {
-    clearModel();
+  function buildDoc(res, file) {
+    const doc = { name: file.name, size: file.size, root: res.root, group: new THREE.Group(), meshes: [],
+      tree: document.createElement("div"), treeBuilt: false, view: null };
     res.meshes.forEach((om, i) => {
       const g = new THREE.BufferGeometry();
       const f32 = (a) => (a instanceof Float32Array ? a : new Float32Array(a)); // the worker already sends typed arrays
@@ -108,12 +122,61 @@
       const edges = new THREE.LineSegments(new THREE.EdgesGeometry(g, 30), edgeMat);
       edges.raycast = () => {};
       mesh.add(edges);
-      modelGroup.add(mesh);
-      meshes.push(mesh);
+      doc.group.add(mesh);
+      doc.meshes.push(mesh);
     });
-    updateModelBox();
-    buildTree(res.root);
+    return doc;
   }
+
+  // ---------- tabs ----------
+  function activate(doc) {
+    if (active === doc) return;
+    clearSelection(); clearMarks();
+    if (active) {
+      active.view = { pos: camera.position.clone(), target: controls.target.clone(), up: camera.up.clone(), near: camera.near, far: camera.far };
+      scene.remove(active.group); active.tree.remove();
+    }
+    active = doc; meshes = doc.meshes;
+    scene.add(doc.group);
+    if (!doc.treeBuilt) { buildTree(doc.root, doc.tree); doc.treeBuilt = true; }
+    $("tree").appendChild(doc.tree);
+    relabelDims(); syncChecks();
+    $("fileName").textContent = doc.name;
+    showOverallChip();
+    const v = doc.view;
+    if (v) {
+      camera.position.copy(v.pos); camera.up.copy(v.up); camera.near = v.near; camera.far = v.far;
+      camera.updateProjectionMatrix(); controls.target.copy(v.target); controls.update();
+      updateModelBox();
+    } else frame(...VIEWS.iso);
+    showHint(); renderTabs(); requestRender();
+  }
+  function closeDoc(doc) {
+    const i = docs.indexOf(doc); if (i < 0) return;
+    if (active === doc) {
+      clearSelection(); clearMarks();
+      scene.remove(doc.group); doc.tree.remove();
+      active = null; meshes = [];
+    }
+    doc.meshes.forEach((m) => { m.geometry.dispose(); m.material.dispose(); m.children.forEach((c) => c.geometry.dispose()); });
+    docs.splice(i, 1);
+    if (!active) {
+      if (docs.length) activate(docs[Math.min(i, docs.length - 1)]);
+      else { $("fileName").textContent = "No file"; $("chip").hidden = true; showStart(); }
+    }
+    renderTabs(); requestRender();
+  }
+  function renderTabs() {
+    const el = $("tabs");
+    el.hidden = docs.length < 2;
+    el.innerHTML = docs.map((d, i) => `<span class="tab${d === active ? " on" : ""}"><button class="tn" type="button" role="tab" aria-selected="${d === active}" data-tab="${i}" title="${esc(d.name)}">${esc(d.name)}</button><button class="tx" type="button" data-close="${i}" aria-label="Close ${esc(d.name)}">×</button></span>`).join("");
+    const on = el.querySelector(".on"); if (on && !el.hidden) on.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }
+  $("tabs").addEventListener("click", (e) => {
+    const t = e.target.closest("[data-tab]"), x = e.target.closest("[data-close]");
+    if (t) activate(docs[+t.dataset.tab]);
+    else if (x) closeDoc(docs[+x.dataset.close]);
+  });
 
   function updateModelBox(only) {
     modelBox = new THREE.Box3();
@@ -639,8 +702,7 @@
     row.innerHTML = `<span class="caret">${isAsm ? "▶" : ""}</span><input type="checkbox" checked aria-label="Show ${esc(name)}"><span class="nm">${esc(name)}</span>${isAsm ? `<span class="ct">${ids.length}</span>` : ""}<button type="button">Isolate</button>`;
     return row;
   }
-  function buildTree(root) {
-    const tree = $("tree"); tree.innerHTML = "";
+  function buildTree(root, tree) {
     let top = root;
     while (top && !top.meshes.length && top.children.length === 1 && !top.name) top = top.children[0];
     const add = (node, depth, parent) => {
@@ -801,41 +863,58 @@
   function done() { overlay.hidden = true; }
   const nextPaint = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
 
-  let loadSeq = 0;
-  async function loadBuffer(buf, name) {
-    cancelLoad(); // a new file replaces one still being read
-    const my = ++loadSeq;
-    const ext = name.toLowerCase().split(".").pop();
-    if (!["stp", "step", "igs", "iges", "brep", "brp"].includes(ext)) {
-      busy(`<div class="err">${esc(name)} isn't a STEP file.</div><div class="hint">Pick a .stp or .step file. IGES and BREP work too.</div><button class="btn" data-dismiss>OK</button>`);
-      return;
+  // Files are read one after another; each one that opens becomes a tab. Cancel stops the
+  // rest of the batch and keeps the files already opened.
+  const EXTS = ["stp", "step", "igs", "iges", "brep", "brp"];
+  const PARAMS = { linearUnit: "millimeter", linearDeflectionType: "bounding_box_ratio", linearDeflection: 0.0008, angularDeflection: 0.35 };
+  let loadSeq = 0, batch = null;
+  async function loadFiles(files) {
+    if (!files.length) return;
+    if (batch) batch.cancelled = true;
+    cancelLoad(); // new files replace a batch still being read
+    const my = ++loadSeq, b = (batch = { cancelled: false });
+    const opened = [], failed = [], n = files.length;
+    for (let k = 0; k < n && !b.cancelled; k++) {
+      const f = files[k], ext = f.name.toLowerCase().split(".").pop();
+      const already = docs.find((d) => d.name === f.name && d.size === f.size);
+      if (already) { opened.push(already); continue; }
+      if (!EXTS.includes(ext)) {
+        failed.push({ name: f.name, title: `${esc(f.name)} isn't a STEP file.`, detail: "Pick a .stp or .step file. IGES and BREP work too.", short: "not a STEP file" });
+        continue;
+      }
+      busy(`<div class="spin"></div><div>Reading ${n > 1 ? `${k + 1} of ${n}: ` : ""}<b>${esc(f.name)}</b>…</div><div class="hint">${(f.size / 1048576).toFixed(1)} MB. Large assemblies can take a minute on a phone.</div><button class="btn" type="button" data-cancel>Cancel</button>`);
+      await nextPaint();
+      try {
+        const buf = await f.arrayBuffer();
+        if (b.cancelled) break;
+        let res;
+        try { res = await parse(ext, buf, PARAMS); } catch (err) { if (!err.cancelled) freshEngine(); throw err; }
+        if (my !== loadSeq) return;
+        freshEngine();
+        if (!res || !res.success || !res.meshes.length) throw new Error("The file opened but has no solid geometry in it.");
+        const doc = buildDoc(res, f);
+        docs.push(doc); opened.push(doc);
+      } catch (err) {
+        if (my !== loadSeq) return;
+        if (err && err.cancelled) break;
+        console.error(err);
+        const msg = esc((err && err.message) || err);
+        failed.push({ name: f.name, title: `Couldn't open ${esc(f.name)}.`, detail: msg, short: msg });
+      }
     }
-    busy(`<div class="spin"></div><div>Reading <b>${esc(name)}</b>…</div><div class="hint">${(buf.byteLength / 1048576).toFixed(1)} MB. Large assemblies can take a minute on a phone.</div><button class="btn" type="button" data-cancel>Cancel</button>`);
-    await nextPaint();
-    try {
-      const params = { linearUnit: "millimeter", linearDeflectionType: "bounding_box_ratio", linearDeflection: 0.0008, angularDeflection: 0.35 };
-      let res;
-      try { res = await parse(ext, buf, params); } catch (err) { if (!err.cancelled) freshEngine(); throw err; }
-      if (my !== loadSeq) return;
-      freshEngine();
-      if (!res || !res.success || !res.meshes.length) throw new Error("The file opened but has no solid geometry in it.");
-      buildModel(res);
-      $("fileName").textContent = name;
-      showOverallChip();
-      frame(...VIEWS.iso);
-      showHint();
-      done();
-    } catch (err) {
-      if (my !== loadSeq) return;
-      if (err && err.cancelled) { if (meshes.length) done(); else showStart(); return; }
-      console.error(err);
-      busy(`<div class="err">Couldn't open ${esc(name)}.</div><div class="hint">${esc(err && err.message || err)}</div><button class="btn" data-dismiss>OK</button>`);
-    }
+    if (my !== loadSeq) return;
+    batch = null;
+    if (opened.length) activate(opened[0]);
+    renderTabs();
+    if (failed.length === 1) busy(`<div class="err">${failed[0].title}</div><div class="hint">${failed[0].detail}</div><button class="btn" data-dismiss>OK</button>`);
+    else if (failed.length) busy(`<div class="err">Couldn't open ${failed.length} files.</div><div class="hint">${failed.map((x) => `<b>${esc(x.name)}</b>: ${x.short}`).join("<br>")}</div><button class="btn" data-dismiss>OK</button>`);
+    else if (docs.length) done();
+    else showStart();
   }
   overlay.addEventListener("click", (e) => {
     if (e.target.closest("[data-open]")) $("fileInput").click();
-    if (e.target.closest("[data-cancel]")) cancelLoad();
-    if (e.target.closest("[data-dismiss]")) { if (meshes.length) done(); else showStart(); }
+    if (e.target.closest("[data-cancel]")) { if (batch) batch.cancelled = true; cancelLoad(); }
+    if (e.target.closest("[data-dismiss]")) { if (docs.length) done(); else showStart(); }
   });
 
   // first screen: nothing loaded yet
@@ -843,22 +922,22 @@
     setReadout("");
     busy(`<div class="start-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M12 12l8-4.5M12 12v9M12 12L4 7.5"/></svg></div>
       <h2 class="start-title">Open a STEP file</h2>
-      <div class="hint">Choose a .stp or .step file from your phone. IGES and BREP work too.</div>
-      <button class="btn primary start-btn" type="button" data-open>Choose file</button>
-      <div class="hint start-note">Your file is opened on this device and is never uploaded.</div>`);
+      <div class="hint">Choose one or more .stp or .step files from your phone. Each opens in its own tab. IGES and BREP work too.</div>
+      <button class="btn primary start-btn" type="button" data-open>Choose files</button>
+      <div class="hint start-note">Your files are opened on this device and are never uploaded.</div>`);
   }
 
   $("openBtn").addEventListener("click", () => $("fileInput").click());
-  $("fileInput").addEventListener("change", async (e) => {
-    const f = e.target.files[0]; if (!f) return;
-    await loadBuffer(await f.arrayBuffer(), f.name);
-    e.target.value = "";
+  $("fileInput").addEventListener("change", (e) => {
+    const files = [...e.target.files];
+    e.target.value = ""; // so picking the same file again still fires "change"
+    loadFiles(files);
   });
   stage.addEventListener("dragover", (e) => { e.preventDefault(); stage.classList.add("drop"); });
   stage.addEventListener("dragleave", () => stage.classList.remove("drop"));
-  stage.addEventListener("drop", async (e) => {
+  stage.addEventListener("drop", (e) => {
     e.preventDefault(); stage.classList.remove("drop");
-    const f = e.dataTransfer.files[0]; if (f) await loadBuffer(await f.arrayBuffer(), f.name);
+    loadFiles([...e.dataTransfer.files]);
   });
 
   // ---------- render loop ----------
