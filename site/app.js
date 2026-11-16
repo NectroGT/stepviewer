@@ -138,9 +138,36 @@
       mesh.add(edges);
       doc.group.add(mesh);
       doc.meshes.push(mesh);
+      // memory estimate: model data kept by the page, plus the same again on the graphics chip
+      const bytes = (geo) => Object.values(geo.attributes).concat(geo.index || []).reduce((t, a) => t + a.array.byteLength, 0);
+      doc.mem = (doc.mem || 0) + 2 * (bytes(g) + bytes(eg));
     });
     return doc;
   }
+
+  // ---------- memory warning ----------
+  // With two or more files open, warn once their models together are likely to strain the device.
+  // Phones (touch screens) get a lower limit; a phone that reports little memory, lower still.
+  const MB = (b) => Math.round(b / 1048576);
+  const memText = (b) => (b < 1048576 ? "under 1 MB" : `about ${MB(b)} MB`);
+  const memLimit = (() => {
+    let mb = matchMedia("(pointer: coarse)").matches ? 300 : 1000;
+    if (navigator.deviceMemory && navigator.deviceMemory <= 2) mb = Math.min(mb, 150);
+    return mb * 1048576;
+  })();
+  const memwarn = $("memwarn");
+  function checkMemory(fromLoad) {
+    const total = docs.reduce((t, d) => t + (d.mem || 0), 0);
+    if (docs.length < 2 || total < memLimit) { memwarn.hidden = true; return; }
+    if (memwarn.hidden && !fromLoad) return; // dismissed: wait for the next file to be opened
+    const big = docs.reduce((a, b) => (b.mem > a.mem ? b : a));
+    memwarn.innerHTML = `<div><b>${docs.length} files open, about ${MB(total)} MB of memory.</b>
+      On a phone this can make the page reload and lose your open tabs. Close files you're not using.
+      <span class="mw-big">Largest: ${esc(big.name)} (${memText(big.mem)})</span></div>
+      <button type="button" class="mw-x" aria-label="Dismiss warning">×</button>`;
+    memwarn.hidden = false;
+  }
+  memwarn.addEventListener("click", (e) => { if (e.target.closest(".mw-x")) memwarn.hidden = true; });
 
   // ---------- compare (two files side by side) ----------
   // While comparing, the canvas is split in two: the active tab (A) and another tab (B). Both
@@ -259,13 +286,13 @@
       if (docs.length) activate(docs[Math.min(i, docs.length - 1)]);
       else { $("fileName").textContent = "No file"; showStart(); }
     }
-    renderTabs(); requestRender();
+    renderTabs(); requestRender(); checkMemory(false);
   }
   function renderTabs() {
     const el = $("tabs");
     el.hidden = docs.length < 2;
     const ab = (d) => (!cmp ? "" : d === active ? '<b class="ab">A</b>' : d === cmp.b ? '<b class="ab">B</b>' : "");
-    el.innerHTML = docs.map((d, i) => `<span class="tab${d === active ? " on" : cmp && d === cmp.b ? " onb" : ""}"><button class="tn" type="button" role="tab" aria-selected="${d === active}" data-tab="${i}" title="${esc(d.name)}">${ab(d)}${esc(d.name)}</button><button class="tx" type="button" data-close="${i}" aria-label="Close ${esc(d.name)}">×</button></span>`).join("")
+    el.innerHTML = docs.map((d, i) => `<span class="tab${d === active ? " on" : cmp && d === cmp.b ? " onb" : ""}"><button class="tn" type="button" role="tab" aria-selected="${d === active}" data-tab="${i}" title="${esc(d.name)}${d.mem ? ` · ${memText(d.mem)} of memory` : ""}">${ab(d)}${esc(d.name)}</button><button class="tx" type="button" data-close="${i}" aria-label="Close ${esc(d.name)}">×</button></span>`).join("")
       + (docs.length >= 2 ? `<button class="cmp" type="button" data-compare aria-pressed="${!!cmp}">${cmp ? "End compare" : "Compare"}</button>` : "");
     const on = el.querySelector(".on"); if (on && !el.hidden) on.scrollIntoView({ block: "nearest", inline: "nearest" });
   }
@@ -1122,6 +1149,7 @@
     if (my !== loadSeq) return;
     batch = null;
     if (opened.length) activate(opened[0]);
+    if (opened.length) checkMemory(true);
     renderTabs();
     if (failed.length === 1) busy(`<div class="err">${failed[0].title}</div><div class="hint">${failed[0].detail}</div><button class="btn" data-dismiss>OK</button>`);
     else if (failed.length) busy(`<div class="err">Couldn't open ${failed.length} files.</div><div class="hint">${failed.map((x) => `<b>${esc(x.name)}</b>: ${x.short}`).join("<br>")}</div><button class="btn" data-dismiss>OK</button>`);
