@@ -18,7 +18,7 @@ cd desktop
 npx electron-builder --win nsis
 ```
 
-The installer is written to `dist/Pocket STEP Viewer Setup <version>.exe` (about 120 MB). It installs for
+The installer is written to `dist/Pocket.STEP.Viewer.Setup.exe` (about 120 MB). It installs for
 the current user, adds Start-menu and desktop shortcuts, and registers the viewer for STEP, IGES and BREP
 files. To release a new version, raise `version` in `package.json` first.
 
@@ -35,6 +35,14 @@ GitHub can build the installer and put it on the repo's Releases page
 
 The build takes about 5 minutes. The version you enter is used for the installer, so `package.json`
 doesn't need editing. Each version number can be released once.
+
+Links to share (they always point at the newest release):
+
+- page: `https://github.com/NectroGT/stepviewer/releases/latest`
+- direct download: `https://github.com/NectroGT/stepviewer/releases/latest/download/Pocket.STEP.Viewer.Setup.exe`
+
+The direct link works because the installer's file name has no version in it (`artifactName` in
+`package.json`); the version shows in the installer and in Help > About.
 
 ## How it works
 

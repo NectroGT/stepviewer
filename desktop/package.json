@@ -36,7 +36,8 @@
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
-      "shortcutName": "Pocket STEP Viewer"
+      "shortcutName": "Pocket STEP Viewer",
+      "artifactName": "Pocket.STEP.Viewer.Setup.${ext}"
     },
     "fileAssociations": [
       {
