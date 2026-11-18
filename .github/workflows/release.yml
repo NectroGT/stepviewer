@@ -1,0 +1,64 @@
+# Builds the Windows desktop app (desktop/) and publishes the installer on the repo's Releases page.
+# Start it either way:
+#   - Actions tab -> "Release desktop app" -> Run workflow -> enter a version such as 1.0.1
+#   - or push a tag:  git tag v1.0.1 && git push origin v1.0.1
+# The version from the tag/input is used for the installer, so package.json doesn't need editing.
+name: Release desktop app
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version number, e.g. 1.0.1 (a tag v<version> is created)"
+        required: true
+
+permissions:
+  contents: write # create the release and upload the installer
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Work out the version
+        id: ver
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then v="${{ inputs.version }}"; else v="${GITHUB_REF_NAME}"; fi
+          v="${v#v}"
+          if ! [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then echo "Version must look like 1.2.3, got '$v'"; exit 1; fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+      - name: Build the installer
+        working-directory: desktop
+        run: |
+          npm ci
+          npm version "${{ steps.ver.outputs.version }}" --no-git-tag-version --allow-same-version
+          npx electron-builder --win nsis --publish never
+          ls -la dist
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v="${{ steps.ver.outputs.version }}"
+          cat > notes.md <<'EOF'
+          Windows installer for Pocket STEP Viewer: open STEP, IGES and BREP files and measure parts. Files never leave your computer.
+
+          **Install:** download the `Setup .exe` below and run it. Windows may show "Windows protected your PC" because the installer isn't code-signed: click **More info -> Run anyway**. It installs for your user only (no admin needed), adds Start-menu and desktop shortcuts, and opens .stp/.step files you double-click.
+
+          Requires Windows 10 or 11 (64-bit). Prefer not to install anything? The same viewer runs in the browser: https://nectrogt.github.io/stepviewer/
+          EOF
+          gh release create "v$v" desktop/dist/*.exe --target "$GITHUB_SHA" --title "Pocket STEP Viewer $v" --notes-file notes.md

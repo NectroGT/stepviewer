@@ -25,6 +25,17 @@ files. To release a new version, raise `version` in `package.json` first.
 The installer isn't code-signed, so Windows SmartScreen shows "Windows protected your PC" the first time:
 click **More info**, then **Run anyway**. Signing needs a paid code-signing certificate.
 
+## Publish a download (GitHub Releases)
+
+GitHub can build the installer and put it on the repo's Releases page
+(`https://github.com/NectroGT/stepviewer/releases`), so other computers can download it:
+
+- On GitHub: **Actions** -> **Release desktop app** -> **Run workflow**, enter a new version (e.g. `1.0.1`), or
+- from a terminal: `git tag v1.0.1` then `git push origin v1.0.1`.
+
+The build takes about 5 minutes. The version you enter is used for the installer, so `package.json`
+doesn't need editing. Each version number can be released once.
+
 ## How it works
 
 - `main.js`: creates the window, serves `../site` at `app://viewer/`, handles File > Open, double-clicked
