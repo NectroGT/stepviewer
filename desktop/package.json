@@ -1,0 +1,75 @@
+{
+  "name": "pocket-step-viewer",
+  "productName": "Pocket STEP Viewer",
+  "version": "1.0.0",
+  "description": "Open STEP files and measure parts. Files stay on this computer.",
+  "private": true,
+  "main": "main.js",
+  "scripts": {
+    "start": "node start.js",
+    "dist": "electron-builder --win nsis"
+  },
+  "build": {
+    "appId": "com.pocketstepviewer.app",
+    "productName": "Pocket STEP Viewer",
+    "files": [
+      "main.js",
+      "preload.js",
+      "build/icon.png"
+    ],
+    "extraResources": [
+      {
+        "from": "../site",
+        "to": "site"
+      }
+    ],
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "win": {
+      "target": "nsis",
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "Pocket STEP Viewer"
+    },
+    "fileAssociations": [
+      {
+        "ext": [
+          "stp",
+          "step"
+        ],
+        "name": "STEP model",
+        "description": "STEP 3D model",
+        "role": "Viewer"
+      },
+      {
+        "ext": [
+          "igs",
+          "iges"
+        ],
+        "name": "IGES model",
+        "description": "IGES 3D model",
+        "role": "Viewer"
+      },
+      {
+        "ext": [
+          "brep",
+          "brp"
+        ],
+        "name": "BREP model",
+        "description": "BREP 3D model",
+        "role": "Viewer"
+      }
+    ]
+  },
+  "devDependencies": {
+    "electron": "^45.3.4",
+    "electron-builder": "^26.18.0"
+  }
+}

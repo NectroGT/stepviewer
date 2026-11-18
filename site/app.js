@@ -1324,6 +1324,8 @@
     e.target.value = ""; // so picking the same file again still fires "change"
     loadFiles(files);
   });
+  // desktop app (desktop/main.js): files double-clicked in Windows or chosen with File > Open
+  if (window.desktop) window.desktop.onOpenFiles((list) => loadFiles(list.map((f) => new File([f.data], f.name))));
   stage.addEventListener("dragover", (e) => { e.preventDefault(); stage.classList.add("drop"); });
   stage.addEventListener("dragleave", () => stage.classList.remove("drop"));
   stage.addEventListener("drop", (e) => {
