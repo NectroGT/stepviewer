@@ -1,4 +1,4 @@
-# Pocket STEP Viewer: desktop app
+# ConnectIQ STP Viewer: desktop app
 
 The same viewer as the website, as a Windows program. It shows the files in `../site` in its own
 window, works offline, and opens `.stp` / `.step` (and IGES, BREP) files you double-click in Windows.
@@ -18,7 +18,7 @@ cd desktop
 npx electron-builder --win nsis
 ```
 
-The installer is written to `dist/Pocket.STEP.Viewer.Setup.exe` (about 120 MB). It installs for
+The installer is written to `dist/ConnectIQ.STP.Viewer.Setup.exe` (about 120 MB). It installs for
 the current user, adds Start-menu and desktop shortcuts, and registers the viewer for STEP, IGES and BREP
 files. To release a new version, raise `version` in `package.json` first.
 
@@ -39,7 +39,8 @@ doesn't need editing. Each version number can be released once.
 Links to share (they always point at the newest release):
 
 - page: `https://github.com/NectroGT/stepviewer/releases/latest`
-- direct download: `https://github.com/NectroGT/stepviewer/releases/latest/download/Pocket.STEP.Viewer.Setup.exe`
+- direct download: `https://github.com/NectroGT/stepviewer/releases/latest/download/ConnectIQ.STP.Viewer.Setup.exe`
+  (the old name `Pocket.STEP.Viewer.Setup.exe` still works: each release includes a copy under it)
 
 The direct link works because the installer's file name has no version in it (`artifactName` in
 `package.json`); the version shows in the installer and in Help > About.

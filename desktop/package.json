@@ -1,6 +1,6 @@
 {
-  "name": "pocket-step-viewer",
-  "productName": "Pocket STEP Viewer",
+  "name": "connectiq-stp-viewer",
+  "productName": "ConnectIQ STP Viewer",
   "version": "1.0.0",
   "description": "Open STEP files and measure parts. Files stay on this computer.",
   "private": true,
@@ -11,7 +11,7 @@
   },
   "build": {
     "appId": "com.pocketstepviewer.app",
-    "productName": "Pocket STEP Viewer",
+    "productName": "ConnectIQ STP Viewer",
     "files": [
       "main.js",
       "preload.js",
@@ -36,8 +36,8 @@
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
-      "shortcutName": "Pocket STEP Viewer",
-      "artifactName": "Pocket.STEP.Viewer.Setup.${ext}"
+      "shortcutName": "ConnectIQ STP Viewer",
+      "artifactName": "ConnectIQ.STP.Viewer.Setup.${ext}"
     },
     "fileAssociations": [
       {

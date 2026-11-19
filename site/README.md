@@ -1,4 +1,4 @@
-# Pocket STEP Viewer
+# ConnectIQ STP Viewer
 
 A phone-friendly web page for opening STEP (also IGES/BREP) files, browsing the part tree, and
 measuring part sizes, hole diameters and distances.

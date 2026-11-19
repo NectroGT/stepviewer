@@ -11,7 +11,7 @@
 <meta name="theme-color" content="#ffffff">
 <script src="theme.js"></script>
 <meta name="description" content="Open STEP files on your phone, browse the part tree, and measure part sizes, hole diameters and distances. Files stay on your device.">
-<title>Pocket STEP Viewer</title>
+<title>ConnectIQ STP Viewer</title>
 <link rel="icon" type="image/png" sizes="32x32" href="icons/icon-32.png">
 <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -76,13 +76,13 @@ body {
 }
 .brand { display: flex; flex-direction: column; min-width: 0; flex: 1; }
 .bar > .btn { flex: none; }
+.brand h1 { margin: 0; font: 600 17px/1.1 var(--font-head); letter-spacing: .01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 @media (max-width: 420px) {
   .bar { gap: 8px; }
   .btn { padding: 0 10px; }
   #partsBtn .lbl, #openBtn .lbl { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
-  .brand h1 { font-size: 16px; }
+  .brand h1 { font-size: 15px; letter-spacing: 0; }
 }
-.brand h1 { margin: 0; font: 600 17px/1.1 var(--font-head); letter-spacing: .01em; }
 .brand .file { font: 400 12px/1.3 var(--font-num); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 button { font: inherit; color: inherit; }
 .btn {
@@ -313,7 +313,7 @@ details[open] > summary .caret { transform: rotate(90deg); }
       <span class="lbl">Parts</span>
     </button>
     <div class="brand">
-      <h1>Pocket STEP Viewer</h1>
+      <h1>ConnectIQ STP Viewer</h1>
       <span class="file" id="fileName">No file</span>
     </div>
     <button class="btn icon" id="themeBtn" type="button" aria-label="Theme"></button>

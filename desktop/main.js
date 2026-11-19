@@ -1,4 +1,4 @@
-// Pocket STEP Viewer, desktop version.
+// ConnectIQ STP Viewer, desktop version.
 // Shows the same viewer as the website (the files in ../site) in its own window, fully offline.
 // The site files are served from inside the app at app://viewer/, so the page works exactly as it
 // does on the web (its Content Security Policy, background worker and settings included).
@@ -69,8 +69,8 @@ function menu() {
       { type: "separator" }, { role: "reload" }, { role: "toggleDevTools" },
     ] },
     { label: "Help", submenu: [
-      { label: "About Pocket STEP Viewer", click: () => dialog.showMessageBox(win, {
-        type: "info", title: "About", message: `Pocket STEP Viewer ${app.getVersion()}`,
+      { label: "About ConnectIQ STP Viewer", click: () => dialog.showMessageBox(win, {
+        type: "info", title: "About", message: `ConnectIQ STP Viewer ${app.getVersion()}`,
         detail: "Opens STEP, IGES and BREP files on this computer and measures parts.\nFiles are never uploaded.",
       }) },
     ] },
@@ -80,7 +80,7 @@ function menu() {
 function createWindow() {
   win = new BrowserWindow({
     width: 1280, height: 860, minWidth: 360, minHeight: 520,
-    title: "Pocket STEP Viewer", backgroundColor: "#eef1f4",
+    title: "ConnectIQ STP Viewer", backgroundColor: "#eef1f4",
     icon: path.join(__dirname, "build", "icon.png"),
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),

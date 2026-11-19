@@ -55,10 +55,14 @@ jobs:
         run: |
           v="${{ steps.ver.outputs.version }}"
           cat > notes.md <<'EOF'
-          Windows installer for Pocket STEP Viewer: open STEP, IGES and BREP files and measure parts. Files never leave your computer.
+          Windows installer for ConnectIQ STP Viewer: open STEP, IGES and BREP files and measure parts. Files never leave your computer.
 
-          **Install:** download the `Setup .exe` below and run it. Windows may show "Windows protected your PC" because the installer isn't code-signed: click **More info -> Run anyway**. It installs for your user only (no admin needed), adds Start-menu and desktop shortcuts, and opens .stp/.step files you double-click.
+          **Install:** download `ConnectIQ.STP.Viewer.Setup.exe` below and run it. Windows may show "Windows protected your PC" because the installer isn't code-signed: click **More info -> Run anyway**. It installs for your user only (no admin needed), adds Start-menu and desktop shortcuts, and opens .stp/.step files you double-click.
+
+          `Pocket.STEP.Viewer.Setup.exe` is the same installer under the app's previous name, kept so older links still work.
 
           Requires Windows 10 or 11 (64-bit). Prefer not to install anything? The same viewer runs in the browser: https://nectrogt.github.io/stepviewer/
           EOF
-          gh release create "v$v" desktop/dist/*.exe --target "$GITHUB_SHA" --title "Pocket STEP Viewer $v" --notes-file notes.md
+          # the app was called Pocket STEP Viewer before; a copy under the old file name keeps old download links working
+          cp desktop/dist/ConnectIQ.STP.Viewer.Setup.exe desktop/dist/Pocket.STEP.Viewer.Setup.exe
+          gh release create "v$v" desktop/dist/ConnectIQ.STP.Viewer.Setup.exe desktop/dist/Pocket.STEP.Viewer.Setup.exe --target "$GITHUB_SHA" --title "ConnectIQ STP Viewer $v" --notes-file notes.md
