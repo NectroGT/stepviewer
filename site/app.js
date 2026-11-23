@@ -1314,8 +1314,7 @@
     busy(`<img class="start-icon" src="icons/logo-160.png" alt="" width="80" height="80">
       <h2 class="start-title">Open a STEP file</h2>
       <div class="hint">Choose one or more .stp or .step files from your phone. Each opens in its own tab. IGES and BREP work too.</div>
-      <button class="btn primary start-btn" type="button" data-open>Choose files</button>
-      <div class="hint start-note">Your files are opened on this device and are never uploaded.</div>`);
+      <button class="btn primary start-btn" type="button" data-open>Choose files</button>`);
   }
 
   $("openBtn").addEventListener("click", () => $("fileInput").click());
