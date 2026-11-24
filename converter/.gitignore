@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+out/
+pdf2step_out/
+*.step
+*.stp
+*.pdf
+web_jobs/

@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>2dto3d - CAD drawing PDF to STEP</title>
+<meta name="description" content="Turn vector PDF drawings of plate-type parts into 3D STEP models, on your own computer. Nothing is uploaded.">
+<link rel="icon" type="image/png" href="web/logo.png">
+<style>
+:root {
+  --bg: #f7f8fa; --panel: #ffffff; --text: #16191d; --muted: #5d6875; --line: #dfe3e8;
+  --accent: #2f6fdb; --accent-text: #ffffff; --accent-soft: #e8f0fd;
+  --ink: #2b3440; --thin: #8792a0; --face-top: #c9d6e8; --face-right: #9fb2cc; --face-front: #b4c4da; --hole: #3d4a5c;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #101317; --panel: #181c22; --text: #e7eaee; --muted: #9aa4b0; --line: #2a3038;
+    --accent: #5b93f5; --accent-text: #0a1222; --accent-soft: #1a2638;
+    --ink: #c9d2dc; --thin: #7b8794; --face-top: #4a5d78; --face-right: #2f3e54; --face-front: #3c4d66; --hole: #11161d;
+  }
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+a { color: var(--accent); }
+.wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+
+nav { position: sticky; top: 0; z-index: 5; background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); }
+nav .wrap { display: flex; align-items: center; gap: 20px; height: 60px; }
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 18px; color: var(--text); text-decoration: none; }
+.brand img { width: 30px; height: 30px; }
+nav .links { margin-left: auto; display: flex; gap: 20px; }
+nav .links a { color: var(--muted); text-decoration: none; font-size: 15px; }
+nav .links a:hover { color: var(--text); }
+
+.hero { padding: 72px 0 40px; display: grid; grid-template-columns: 1fr 1.1fr; gap: 48px; align-items: center; }
+.hero h1 { font-size: clamp(32px, 5vw, 48px); line-height: 1.1; margin: 0 0 16px; letter-spacing: -0.02em; }
+.hero p.lead { font-size: 19px; color: var(--muted); margin: 0 0 28px; max-width: 34em; }
+.cta { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+.btn { display: inline-flex; align-items: center; gap: 8px; padding: 11px 20px; border-radius: 10px; font-weight: 600; text-decoration: none; border: 1px solid var(--line); color: var(--text); background: var(--panel); }
+.btn:hover { border-color: var(--accent); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+.btn.primary:hover { filter: brightness(1.08); }
+.small { color: var(--muted); font-size: 14px; }
+.cta .small { flex-basis: 100%; margin-top: 4px; }
+.figure { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 20px; }
+.figure svg { width: 100%; height: auto; display: block; }
+.figure .cap { display: flex; justify-content: space-between; color: var(--muted); font-size: 13px; margin-top: 8px; padding: 0 6px; }
+
+section { padding: 56px 0; border-top: 1px solid var(--line); }
+section h2 { font-size: 28px; margin: 0 0 8px; letter-spacing: -0.01em; }
+section > .wrap > p.sub { color: var(--muted); margin: 0 0 32px; max-width: 40em; }
+
+.steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; counter-reset: step; list-style: none; padding: 0; margin: 0; }
+.steps li { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 20px; }
+.steps li::before { counter-increment: step; content: counter(step); display: inline-grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-weight: 700; margin-bottom: 10px; }
+.steps h3 { margin: 0 0 6px; font-size: 17px; }
+.steps p { margin: 0; color: var(--muted); font-size: 15px; }
+
+.grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 20px; }
+.card h3 { margin: 0 0 6px; font-size: 16px; }
+.card p { margin: 0; color: var(--muted); font-size: 15px; }
+
+.private { display: grid; grid-template-columns: auto 1fr; gap: 28px; align-items: center; background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 32px; }
+.private svg { width: 72px; height: 72px; color: var(--accent); }
+.private h2 { margin-bottom: 6px; }
+.private ul { margin: 10px 0 0; padding-left: 20px; color: var(--muted); }
+
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; }
+.two ul { margin: 0; padding-left: 20px; color: var(--muted); }
+.two li { margin-bottom: 6px; }
+pre { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; overflow-x: auto; font-size: 14px; line-height: 1.5; margin: 0 0 12px; }
+code { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; }
+
+footer { border-top: 1px solid var(--line); padding: 28px 0 40px; color: var(--muted); font-size: 14px; }
+footer .wrap { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: center; }
+footer .brand { font-size: 15px; }
+footer .brand img { width: 22px; height: 22px; }
+
+@media (max-width: 860px) {
+  .hero { grid-template-columns: 1fr; padding-top: 48px; }
+  .steps { grid-template-columns: 1fr 1fr; }
+  .grid { grid-template-columns: 1fr 1fr; }
+  .two { grid-template-columns: 1fr; }
+}
+@media (max-width: 560px) {
+  .wrap { padding: 0 16px; }
+  .hero { padding: 40px 16px 32px; }
+  nav .links { gap: 14px; }
+  nav .links a.hide-sm { display: none; }
+  .steps, .grid { grid-template-columns: 1fr; }
+  .private { grid-template-columns: 1fr; padding: 24px; }
+}
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <a class="brand" href="#"><img src="web/logo.png" alt="">2dto3d</a>
+    <div class="links">
+      <a href="#how" class="hide-sm">How it works</a>
+      <a href="#reads" class="hide-sm">What it reads</a>
+      <a href="#download">Download</a>
+      <a href="https://github.com/NectroGT/2dto3d">GitHub</a>
+    </div>
+  </div>
+</nav>
+
+<header class="wrap hero">
+  <div>
+    <h1>From drawing PDF to 3D model</h1>
+    <p class="lead">Open a CAD drawing exported as PDF. 2dto3d finds the pages that show a part, reads the views, holes
+      and notes, and builds a STEP model you can open in any CAD program. It all runs on your own computer.</p>
+    <div class="cta">
+      <a class="btn primary" href="#download">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 20h14"/></svg>
+        Download for Windows</a>
+      <a class="btn" href="https://github.com/NectroGT/2dto3d">View the source</a>
+      <span class="small">Free · Windows 10 and 11 · nothing is uploaded</span>
+    </div>
+  </div>
+
+  <div class="figure" role="img" aria-label="A plan view and side view of a plate with five holes, turned into a 3D model of the plate">
+    <svg viewBox="0 0 720 250" fill="none">
+      <!-- drawing sheet -->
+      <rect x="10" y="10" width="270" height="230" rx="4" fill="var(--panel)" stroke="var(--line)" stroke-width="2"/>
+      <rect x="18" y="18" width="254" height="214" stroke="var(--thin)" stroke-width="1"/>
+      <rect x="196" y="200" width="76" height="32" stroke="var(--thin)" stroke-width="1"/>
+      <line x1="196" y1="212" x2="272" y2="212" stroke="var(--thin)" stroke-width="1"/>
+      <!-- plan view -->
+      <g stroke="var(--ink)" stroke-width="2.2">
+        <rect x="45" y="44" width="160" height="96"/>
+        <circle cx="69" cy="68" r="7"/><circle cx="181" cy="68" r="7"/>
+        <circle cx="69" cy="116" r="7"/><circle cx="181" cy="116" r="7"/>
+        <circle cx="125" cy="92" r="16"/>
+      </g>
+      <g stroke="var(--thin)" stroke-width="1" stroke-dasharray="8 3 2 3">
+        <line x1="125" y1="70" x2="125" y2="114"/><line x1="103" y1="92" x2="147" y2="92"/>
+      </g>
+      <!-- dimension -->
+      <g stroke="var(--thin)" stroke-width="1">
+        <line x1="45" y1="38" x2="45" y2="28"/><line x1="205" y1="38" x2="205" y2="28"/>
+        <line x1="45" y1="32" x2="205" y2="32"/>
+        <path d="M45 32l7-3v6zM205 32l-7-3v6z" fill="var(--thin)"/>
+      </g>
+      <!-- side view, lined up below -->
+      <rect x="45" y="158" width="160" height="16" stroke="var(--ink)" stroke-width="2.2"/>
+      <g stroke="var(--thin)" stroke-width="1.2" stroke-dasharray="4 3">
+        <line x1="62" y1="158" x2="62" y2="174"/><line x1="76" y1="158" x2="76" y2="174"/>
+        <line x1="174" y1="158" x2="174" y2="174"/><line x1="188" y1="158" x2="188" y2="174"/>
+        <line x1="109" y1="158" x2="109" y2="174"/><line x1="141" y1="158" x2="141" y2="174"/>
+      </g>
+      <g stroke="var(--thin)" stroke-width="1" stroke-dasharray="2 4">
+        <line x1="45" y1="140" x2="45" y2="158"/><line x1="205" y1="140" x2="205" y2="158"/>
+      </g>
+
+      <!-- arrow -->
+      <path d="M300 125h52" stroke="var(--accent)" stroke-width="4" stroke-linecap="round"/>
+      <path d="M346 112l16 13-16 13" stroke="var(--accent)" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+
+      <!-- 3D plate (isometric) -->
+      <g transform="translate(500 52)" stroke="var(--ink)" stroke-width="1.6" stroke-linejoin="round">
+        <polygon points="69.3,142 -103.9,42 -103.9,60 69.3,160" fill="var(--face-front)"/>
+        <polygon points="173.2,82 69.3,142 69.3,160 173.2,100" fill="var(--face-right)"/>
+        <polygon points="0,-18 173.2,82 69.3,142 -103.9,42" fill="var(--face-top)"/>
+        <g fill="var(--hole)" stroke="none">
+          <ellipse cx="0" cy="12" rx="11" ry="6.4"/>
+          <ellipse cx="121.2" cy="82" rx="11" ry="6.4"/>
+          <ellipse cx="-52" cy="42" rx="11" ry="6.4"/>
+          <ellipse cx="69.3" cy="112" rx="11" ry="6.4"/>
+          <ellipse cx="34.6" cy="62" rx="24.5" ry="14.1"/>
+        </g>
+      </g>
+    </svg>
+    <div class="cap"><span>Vector PDF drawing</span><span>STEP model</span></div>
+  </div>
+</header>
+
+<section id="how">
+  <div class="wrap">
+    <h2>How it works</h2>
+    <p class="sub">The PDF keeps the drawing as real lines, arcs and circles, so sizes are measured from the
+      geometry and the sheet scale, not guessed from a picture.</p>
+    <ol class="steps">
+      <li><h3>Open a PDF</h3><p>Pick a drawing exported from NX, SolidWorks, Creo, Inventor, Fusion or similar.</p></li>
+      <li><h3>Scan every page</h3><p>Each page is checked for a part. Pages that cannot be used say why, for example an assembly or a scanned image.</p></li>
+      <li><h3>Convert</h3><p>Convert one page or all usable pages. Each part is built as a solid with its holes, pockets and steps.</p></li>
+      <li><h3>Preview and save</h3><p>Turn each part around in 3D, then save it as a STEP file for your CAD program.</p></li>
+    </ol>
+  </div>
+</section>
+
+<section id="reads">
+  <div class="wrap">
+    <h2>What it reads from the drawing</h2>
+    <p class="sub">Built for plate-type parts: flat plates, blocks and brackets with holes and pockets, drawn in third-angle projection.</p>
+    <div class="grid">
+      <div class="card"><h3>Outline and thickness</h3><p>The outer boundary of the plan view, with true arcs, and the thickness from the side view lined up next to it.</p></div>
+      <div class="card"><h3>Holes</h3><p>Through and blind holes and counterbores, on either face, with each step's depth from the side and section views.</p></div>
+      <div class="card"><h3>Pockets and cut-outs</h3><p>Inner boundaries cut through, or to the depth of the pocket floor shown in the side view.</p></div>
+      <div class="card"><h3>Hole notes</h3><p>Callouts like <code>6X #10-24 UNC ↧.50</code> or <code>26X Ø.21 THRU</code> set the size and depth of every matching hole.</p></div>
+      <div class="card"><h3>Scale from the title block</h3><p>The sheet scale is read from the title block, so there is nothing to type in.</p></div>
+      <div class="card"><h3>Detail, section and turned views</h3><p>Details are placed on their parent view, sections cut away what they show as empty, and views drawn at an angle are straightened.</p></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="private">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M12 3l7 3v5c0 4.5-3 8.3-7 10-4-1.7-7-5.5-7-10V6l7-3z"/><path d="m8.8 12.2 2.2 2.2 4.3-4.6"/>
+      </svg>
+      <div>
+        <h2>Your drawings stay on your computer</h2>
+        <p class="small" style="font-size:16px;margin:0">2dto3d is a program you run, not a website you upload to.</p>
+        <ul>
+          <li>No upload, no account, no server. It works offline.</li>
+          <li>Working files are kept only while the program is open.</li>
+          <li>You choose where each STEP file is saved.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="download">
+  <div class="wrap two">
+    <div>
+      <h2>Download</h2>
+      <p class="sub" style="margin-bottom:20px">The Windows installer is published on the GitHub releases page.</p>
+      <div class="cta" style="margin-bottom:28px">
+        <a class="btn primary" href="https://github.com/NectroGT/2dto3d/releases/latest">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 20h14"/></svg>
+          Latest release</a>
+        <span class="small">Windows 10 and 11, 64-bit</span>
+      </div>
+      <h3 style="margin:0 0 8px;font-size:17px">Good to know</h3>
+      <ul>
+        <li>The PDF must be a vector export from CAD. Scanned drawings have no lines to read.</li>
+        <li>Assembly drawings are skipped; convert the sheets of the single parts.</li>
+        <li>Threads are built at the drawn hole size, and slanted features are left out.</li>
+        <li>Check every model against the drawing before you use it.</li>
+      </ul>
+    </div>
+    <div>
+      <h2>Run from source</h2>
+      <p class="sub" style="margin-bottom:20px">With Python 3.11 or newer installed:</p>
+      <pre><code>git clone https://github.com/NectroGT/2dto3d
+cd 2dto3d
+pip install -r requirements.txt
+python app.py</code></pre>
+      <p class="small">Then open <code>http://127.0.0.1:5000</code>. The app only listens on your own computer.</p>
+      <p class="small" style="margin-top:16px">Or from the command line:</p>
+      <pre><code>python scan.py drawing.pdf
+python pdf2step.py drawing.pdf --page 3 -o out/</code></pre>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <a class="brand" href="#"><img src="web/logo.png" alt="">2dto3d</a>
+    <span>Vector PDF drawings to STEP models.</span>
+    <a href="https://github.com/NectroGT/2dto3d">Source on GitHub</a>
+  </div>
+</footer>
+
+</body>
+</html>
