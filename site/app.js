@@ -1317,6 +1317,28 @@
       <button class="btn primary start-btn" type="button" data-open>Choose files</button>`);
   }
 
+  // ?open=/path/part.step (repeatable): open files from this same site, e.g. the "Open in viewer"
+  // buttons of the PDF-to-STEP converter (converter/app.py serves this viewer at /viewer/).
+  // Only same-origin addresses are fetched; the page's CSP (connect-src 'self') enforces that too.
+  async function openFromLink() {
+    const urls = new URLSearchParams(location.search).getAll("open")
+      .map((u) => { try { return new URL(u, location.href); } catch { return null; } })
+      .filter((u) => u && u.origin === location.origin);
+    if (!urls.length) return;
+    busy(`<div class="spin"></div><div>Fetching ${urls.length > 1 ? `${urls.length} files` : "the file"}…</div>`);
+    const files = [], failed = [];
+    for (const u of urls) {
+      const name = decodeURIComponent(u.pathname.split("/").pop()) || "part.step";
+      try {
+        const r = await fetch(u, { credentials: "same-origin" });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        files.push(new File([await r.blob()], name));
+      } catch (err) { failed.push(`<b>${esc(name)}</b>: ${esc(err.message || err)}`); }
+    }
+    if (files.length) await loadFiles(files);
+    if (failed.length) busy(`<div class="err">Couldn't fetch ${failed.length > 1 ? `${failed.length} files` : "the file"}.</div><div class="hint">${failed.join("<br>")}</div><button class="btn" data-dismiss>OK</button>`);
+  }
+
   $("openBtn").addEventListener("click", () => $("fileInput").click());
   $("fileInput").addEventListener("change", (e) => {
     const files = [...e.target.files];
@@ -1360,6 +1382,7 @@
   resize();
   tick();
   showStart();
+  openFromLink();
   // warm up the CAD engine in the background so the first file opens faster
   engine().catch((err) => console.warn(err));
 })();

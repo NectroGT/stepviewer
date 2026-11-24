@@ -7,11 +7,17 @@ import io, json, os, shutil, sys, threading, time, traceback, uuid, warnings, zi
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 warnings.filterwarnings("ignore")
 
+import mimetypes
+mimetypes.add_type("application/wasm", ".wasm")   # Windows' registry often lacks it; WebAssembly needs it
+mimetypes.add_type("text/javascript", ".js")
 import pymupdf
-from flask import Flask, jsonify, request, send_file, send_from_directory, abort
+from flask import Flask, jsonify, request, send_file, send_from_directory, abort, redirect
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 JOBS = os.path.join(HERE, "web_jobs")
+# the STP viewer from the same repo (stepviewer/site): served at /viewer/ so converted parts open in it
+SITE = os.path.normpath(os.path.join(HERE, "..", "site"))
+HAS_VIEWER = os.path.isfile(os.path.join(SITE, "index.html"))
 os.makedirs(JOBS, exist_ok=True)
 
 app = Flask(__name__, static_folder=None)
@@ -114,7 +120,24 @@ def get_job(job_id):
 
 @app.get("/")
 def index():
-    return send_from_directory(os.path.join(HERE, "web"), "index.html")
+    with open(os.path.join(HERE, "web", "index.html"), encoding="utf-8") as f:
+        html = f.read()
+    if HAS_VIEWER:                             # turns on the "Open in viewer" buttons
+        html = html.replace('<html lang="en">', '<html lang="en" data-viewer="1">', 1)
+    return html, 200, {"Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache"}
+
+
+@app.get("/viewer")
+def viewer_root():
+    return redirect("/viewer/", 301)
+
+
+@app.get("/viewer/")
+@app.get("/viewer/<path:name>")
+def viewer_file(name="index.html"):
+    if not HAS_VIEWER:
+        abort(404)
+    return send_from_directory(SITE, name)
 
 
 @app.get("/web/<path:name>")
@@ -223,6 +246,8 @@ if __name__ == "__main__":
                      "Close it first, or pick another --port.")
     import scan
     print(f"pdf2step web: open http://127.0.0.1:{a.port}   ({scan.workers()} worker processes)")
+    if HAS_VIEWER:
+        print(f"  STP viewer: http://127.0.0.1:{a.port}/viewer/")
     if a.host not in ("127.0.0.1", "localhost"):
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:

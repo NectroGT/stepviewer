@@ -28,6 +28,11 @@ it is only shown, never used to build the model), and download the STEP files on
 side by side in up to 4 worker processes; the text read by the scan is kept, so converting does not run OCR again.
 Uploads and results are kept in `web_jobs/`.
 
+**Open in viewer:** the app also serves the ConnectIQ STP Viewer from this repo (`../site`) at
+`http://127.0.0.1:5000/viewer/`. Each converted part has an **Open in viewer** button that opens its STEP file
+there in a new tab, with measuring, the cut plane, weight estimates and compare. The file goes from this
+app to the viewer on the same server; nothing is sent anywhere else.
+
 The same scan from the command line:
 ```
 python scan.py drawing.pdf              # one line per page: usable, or why not
