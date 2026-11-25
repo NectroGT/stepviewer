@@ -6,6 +6,11 @@ from shapely.geometry import LineString, Polygon, Point
 from shapely.ops import unary_union, polygonize
 from extract import fit_circle
 
+# sizes are rounded to this grid (model units, inch). 0.0005 in suits inch drawings; pdf2step sets a
+# 0.01 mm grid for drawings dimensioned in millimetres, so 10 mm comes out 10.00, not 9.995
+SNAP_INCH, SNAP_MM = 0.0005, 0.01 / 25.4
+SNAP = SNAP_INCH
+
 
 @dataclass
 class Hole:
@@ -16,6 +21,8 @@ class Hole:
     paper: tuple = None    # centre on the sheet (inches)
     radii_paper: list = None
     drawn: list = None     # [((x, y), r)] every place the hole is drawn on the sheet
+    csk: tuple = None      # countersink (radius, included angle deg, "top" / "bottom", z of its face or None):
+                           # "top" = on a face looking up (the cone narrows downwards)
 
 
 @dataclass
@@ -154,20 +161,86 @@ def _snap_endpoints(prims, tol):
             ends.append(p.pts[0]); ends.append(p.pts[-1])
     if not ends:
         return
-    a = np.array(ends)
+    # group ends lying within tol of each other (chains too) and move every end of a group to the group's
+    # mean, so they meet exactly (each end moved to its own neighbours' mean could still miss the others)
+    n = len(ends)
+    parent = list(range(n))
+    def f(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]; i = parent[i]
+        return i
+    cells = {}
+    for i, q in enumerate(ends):
+        cells.setdefault((math.floor(q[0] / tol), math.floor(q[1] / tol)), []).append(i)
+    for (cx, cy), ids in cells.items():
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                for j in cells.get((cx + dx, cy + dy), ()):
+                    for i in ids:
+                        if i < j and math.dist(ends[i], ends[j]) < tol:
+                            parent[f(i)] = f(j)
+    groups = {}
+    for i in range(n):
+        groups.setdefault(f(i), []).append(i)
+    where = [None] * n
+    for ids in groups.values():
+        if len(ids) > 1:
+            m = (sum(ends[i][0] for i in ids) / len(ids), sum(ends[i][1] for i in ids) / len(ids))
+            for i in ids:
+                where[i] = m
+    i = 0
     for p in prims:
         if p.kind == "circle":
             continue
         for k in (0, -1):
-            d = np.hypot(a[:, 0] - p.pts[k][0], a[:, 1] - p.pts[k][1])
-            near = a[(d < tol) & (d > 0)]
-            if len(near):
-                q = tuple(np.vstack([near, [p.pts[k]]]).mean(0))
-                p.pts[k] = q
+            if where[i] is not None:
+                p.pts[k] = where[i]
+            i += 1
+
+
+def _snap_onto_lines(prims, tol, cell=0.1):
+    """an end that meets no other end but lands (within tol) on the middle of another line - a T junction
+    drawn a hair off - is moved onto that line, so the outline closes there"""
+    ends = {}
+    for i, p in enumerate(prims):
+        if p.kind != "circle":
+            for k in (0, -1):
+                ends.setdefault((round(p.pts[k][0] / tol), round(p.pts[k][1] / tol)), []).append((i, k))
+    loose = []
+    for (gx, gy), lst in ends.items():
+        n = sum(len(ends.get((gx + dx, gy + dy), ())) for dx in (-1, 0, 1) for dy in (-1, 0, 1))
+        if n == 1:
+            loose.extend(lst)
+    if not loose:
+        return
+    grid = {}
+    for i, p in enumerate(prims):
+        for a, b in zip(p.pts, p.pts[1:]):
+            for x in range(int(math.floor((min(a[0], b[0]) - tol) / cell)), int(math.floor((max(a[0], b[0]) + tol) / cell)) + 1):
+                for y in range(int(math.floor((min(a[1], b[1]) - tol) / cell)), int(math.floor((max(a[1], b[1]) + tol) / cell)) + 1):
+                    grid.setdefault((x, y), []).append((i, a, b))
+    for i, k in loose:
+        q = prims[i].pts[k]
+        best = None
+        for j, a, b in grid.get((int(math.floor(q[0] / cell)), int(math.floor(q[1] / cell))), ()):
+            if j == i:
+                continue
+            dx, dy = b[0] - a[0], b[1] - a[1]
+            L2 = dx * dx + dy * dy
+            t = 0.0 if L2 < 1e-12 else max(0.0, min(1.0, ((q[0] - a[0]) * dx + (q[1] - a[1]) * dy) / L2))
+            r = (a[0] + t * dx, a[1] + t * dy)
+            d = math.dist(q, r)
+            if d < tol and (best is None or d < best[0]):
+                best = (d, r)
+        if best and best[0] > 1e-9:
+            # just across the line (a crossing is found for certain; landing exactly on it may round off)
+            (d, r) = best
+            prims[i].pts[k] = (r[0] + (r[0] - q[0]) / d * 1e-4, r[1] + (r[1] - q[1]) / d * 1e-4)
 
 
 def faces(prims, snap=0.004):
     _snap_endpoints(prims, snap)
+    _snap_onto_lines(prims, snap)
     lines = unary_union(_geoms(prims))
     return list(polygonize(lines))
 
@@ -181,30 +254,36 @@ def to_segments(coords, circles, tol):
     """ring coordinates -> list of ("line", p0, p1) / ("arc", p0, pm, p1), arcs re-made from source circles"""
     pts = [tuple(c) for c in coords[:-1]]
     n = len(pts)
-    on = []
-    for p in pts:
-        hit = None
-        for (cx, cy, r) in circles:
-            if abs(math.dist(p, (cx, cy)) - r) < tol:
-                hit = (cx, cy, r); break
-        on.append(hit)
+    # every source circle each vertex lies on (a vertex where two arcs meet lies on both)
+    on = [tuple(c for c in circles if abs(math.dist(p, (c[0], c[1])) - c[2]) < tol) for p in pts]
     segs, i = [], 0
     # start at a vertex that is not inside an arc run
-    start = next((k for k in range(n) if on[k] is None or on[k - 1] != on[k]), 0)
+    start = next((k for k in range(n) if not on[k] or not set(on[k - 1]) & set(on[k])), 0)
     order = [(start + k) % n for k in range(n)] + [start]
     k = 0
     while k < len(order) - 1:
         a = order[k]
-        c = on[a]
-        j = k + 1
-        if c is not None:
-            while j < len(order) - 1 and on[order[j]] == c:
+        shared = [c for c in on[a] if c in on[order[k + 1]]]
+        if shared:
+            c = shared[0]
+            j = k + 1
+            while j < len(order) - 1 and c in on[order[j + 1]]:
                 j += 1
+            # order[k..j] all lie on c: the arc ends at the last of them, not at the vertex after it
             run = order[k:j + 1]
-            if len(run) >= 4 and all(on[q] == c for q in run[:-1]) and abs(math.dist(pts[run[-1]], c[:2]) - c[2]) < tol:
+            if len(run) >= 4:
                 p0, p1 = pts[run[0]], pts[run[-1]]
-                pm = pts[run[len(run) // 2]]
-                segs.append(("arc", p0, pm, p1))
+                if math.dist(p0, p1) < 1e-9:
+                    # a whole circle: two half arcs about the source circle's centre (the ring's middle
+                    # vertex need not be opposite the start - pieces of a circle can be unevenly sampled)
+                    cx, cy, r = c
+                    a0 = math.atan2(p0[1] - cy, p0[0] - cx)
+                    q = [(cx + r * math.cos(a0 + t * math.pi / 2), cy + r * math.sin(a0 + t * math.pi / 2)) for t in (1, 2, 3)]
+                    segs.append(("arc", p0, q[0], q[1]))
+                    segs.append(("arc", q[1], q[2], p0))
+                else:
+                    pm = pts[run[len(run) // 2]]
+                    segs.append(("arc", p0, pm, p1))
                 k = j
                 continue
         segs.append(("line", pts[a], pts[order[k + 1]]))
@@ -440,7 +519,8 @@ def _round_end_view(plan, side):
     return None
 
 
-def recognize(plan, side, bottom, scale, snap=0.0005):
+def recognize(plan, side, bottom, scale, snap=None):
+    snap = snap or SNAP
     if bottom is None and (rv := _round_end_view(plan, side)):
         return recognize(rv[0], rv[1], None, scale, snap)
     notes = []
@@ -475,6 +555,20 @@ def recognize(plan, side, bottom, scale, snap=0.0005):
         groups.append(dict(x=cx, y=cy, r=[(r, side)], at=[(at, r)]))
     for p in plan.prims:
         if p.kind == "circle" and Point(p.cx, p.cy).within(body.buffer(1e-3)) and p.r < 0.45 * min(plan.w, plan.h):
+            add_circle(p.cx, p.cy, p.r, "top")
+    # a circle some exporters draw as arcs (a quarter and three quarters, say): arcs on one centre and radius
+    # that go all the way round are a circle too
+    vis_arcs = {}
+    for p in plan.prims:
+        if p.kind == "arc" and p.r < 0.45 * min(plan.w, plan.h) and Point(p.cx, p.cy).within(outer):
+            vis_arcs.setdefault((round(p.cx / 0.002), round(p.cy / 0.002), round(p.r / 0.001)), []).append(p)
+    for ps_ in vis_arcs.values():
+        turn = 0.0
+        for p in ps_:
+            angs = [math.atan2(y - p.cy, x - p.cx) for x, y in p.pts]
+            turn += sum(abs((b - a + math.pi) % (2 * math.pi) - math.pi) for a, b in zip(angs, angs[1:]))
+        if turn > math.radians(350) and len(ps_) > 1:
+            p = ps_[0]
             add_circle(p.cx, p.cy, p.r, "top")
     # hidden circles (dashed arcs in the plan) are features on the far face: counterbores / holes from below
     arcs = {}
@@ -568,7 +662,7 @@ def recognize(plan, side, bottom, scale, snap=0.0005):
                     us = [u for u, a, b in rdr.lines if min(abs(u - (u0 - rr)), abs(u - (u0 + rr))) < 0.003]
                     if us:
                         rr = sum(abs(u - u0) for u in us) / len(us)
-                    steps = [(r0, "thru", T), (round(rr * scale / 0.0005) * 0.0005, best[1], best[2])]
+                    steps = [(r0, "thru", T), (round(rr * scale / SNAP) * SNAP, best[1], best[2])]
                     break
         # a drill seen from one face that meets a counterbore from the other face goes right through
         if steps:
@@ -763,6 +857,8 @@ def _hidden_edge_holes(pm, plan, outer, scale, M):
             # lines just outside this pair are the same hole drawn at its thread size
             used.update(k for k, (t, a, b) in enumerate(runs) if min(abs(t - t1), abs(t - t2)) < 0.012)
             tc = (t1 + t2) / 2
+            if sp * scale >= T:
+                continue                                       # wider than the part is thick: not a hole
             ex, ey = M((ax + tx * tc, ay + ty * tc))
             depth = (b1 + b2) / 2 * scale
             dup = next((h for h in pm.side_holes if math.dist(h.entry, (ex, ey)) < 0.02), None)
@@ -810,7 +906,7 @@ def _steps(pm, plan, readers, fs, body, outer, scale, M, circles, ctol):
                 cands.append(z)
     if not cands:
         return
-    base = round(max(cands) / 0.0005) * 0.0005
+    base = round(max(cands) / SNAP) * SNAP
     raised = []
     for f in fs:
         if f.area < 0.03 * outer.area or f.area > 0.7 * outer.area:
@@ -833,7 +929,7 @@ def _steps(pm, plan, readers, fs, body, outer, scale, M, circles, ctol):
     for f, z in raised:
         ring = [(k, *[M(q) for q in pts]) for k, *pts in to_segments(list(f.exterior.coords), circles, ctol)]
         inner = [[(k, *[M(q) for q in pts]) for k, *pts in to_segments(list(r.coords), circles, ctol)] for r in f.interiors]
-        pm.raised.append(Raised(ring, inner, round(z / 0.0005) * 0.0005))
+        pm.raised.append(Raised(ring, inner, round(z / SNAP) * SNAP))
     pm.notes.append(f"stepped part: {base:.4f} thick, {len(raised)} raised area(s) up to {max(z for _, z in raised):.4f}")
 
 
@@ -1005,7 +1101,7 @@ def _grooves(pm, plan, readers, fs, body, outer, scale, M, circles, ctol):
             else:
                 cl = [z for z in zs if z > zs[-1] - 0.03]
                 side_, depth = "bottom", (min(cl) + max(cl)) / 2
-            depth = round(depth / 0.0005) * 0.0005
+            depth = round(depth / SNAP) * SNAP
             if not 0.03 < depth < T - 0.03:
                 continue
             width = 2 * f.area / f.length              # about the band's width, for a long thin band
@@ -1099,7 +1195,7 @@ def _rounds(pm, plan, readers, scale, M):
             mid = g[0][3]
             convex = prof.contains(Point(cx, cy))
             r = max(a[2] for a in g) if convex else min(a[2] for a in g)
-            R = round(r * scale / 0.0005) * 0.0005
+            R = round(r * scale / SNAP) * SNAP
             if R < 0.004 or R > 0.3 * pm.thickness:
                 continue
             k = r * math.sqrt(2)                       # the sharp corner the round replaces

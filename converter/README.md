@@ -39,10 +39,21 @@ python scan.py drawing.pdf              # one line per page: usable, or why not
 python scan.py drawing.pdf --no-text    # geometry only (faster, no assembly check)
 ```
 
+## Checking against reference models
+Put drawings and the models they were drawn from side by side as `<name>-drawing.pdf` + `<name>.step`, then
+```
+python check_refs.py path/to/folder                 # one line per part
+python check_refs.py path/to/folder --keep out/     # also keep the converted models
+```
+Each drawing is converted and compared with its model in whichever of the 24 quarter-turn orientations fits best:
+**overlap** (1.0 = identical), **missing** / **extra** material in mm3, and **faces** (converted / reference; many
+more faces means curves came out as flat facets). It exits with an error when a part fails or its overlap is below
+`--min` (0.995), so run it after every change to the converter.
+
 ## How it works
 1. **Reads the lines, not a picture.** The PDF keeps the drawing as true lines, arcs and circles. Thick
    strokes are visible edges; thin strokes are hidden / centre / dimension lines; filled shapes (text, arrow
-   heads) are ignored. Sizes come straight from the geometry and the sheet scale, so they are exact (snapped to 0.0005).
+   heads) are ignored. Sizes come straight from the geometry and the sheet scale, so they are exact (rounded to 0.0005 in, or to 0.01 mm when the title block says the dimensions are in millimetres).
 2. **Finds the views**: connected groups of visible edges; the sheet border, title block, tables and isometric
    views are dropped. Views drawn turned on the sheet (e.g. a part lying at 33 deg) are straightened first.
 3. **Pairs views** (third-angle): the plan view, the thin side / section views lined up with it, and a bottom

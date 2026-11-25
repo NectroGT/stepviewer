@@ -103,6 +103,81 @@ def lines(words, gap=0.12):
     return out
 
 
+def dimension_scale(prims, text_lines, mm, views):
+    """the drawing's true scale measured from its dimensions: model units (inch) per paper inch, or None.
+    A dimension line runs from one end mark (arrow tip or tick) to the other, with its number beside it:
+    for each plain number, the nearest thin horizontal / vertical line running past it is taken as its
+    dimension line, and number / line length is the scale. The line has to measure a view: both its ends
+    line up with that view's corners, edge ends or hole centres, and it lies beside the view (so table
+    rows and title-block lines are not taken). Used only when at least 3 dimensions, and most of those
+    found, agree within 1.5% (both, when there are only 2)."""
+    import statistics
+    segs = []                                   # (axis, fixed coordinate, lo, hi): axis 0 horizontal
+    for p in prims:
+        if p.kind != "line" or p.cls == "visible":
+            continue
+        (ax, ay), (bx, by) = p.pts[0], p.pts[-1]
+        if abs(ay - by) < 1e-3 and abs(bx - ax) > 0.1:
+            segs.append((0, ay, min(ax, bx), max(ax, bx)))
+        elif abs(ax - bx) < 1e-3 and abs(by - ay) > 0.1:
+            segs.append((1, ax, min(ay, by), max(ay, by)))
+    # where each view has geometry to measure from, along x and along y
+    marks = []
+    for v in views:
+        xs, ys = set(), set()
+        for p in v.prims:
+            if p.kind == "line":
+                for q in (p.pts[0], p.pts[-1]):
+                    xs.add(round(q[0], 3)); ys.add(round(q[1], 3))
+            else:
+                xs.update((round(p.cx, 3), round(p.cx - p.r, 3), round(p.cx + p.r, 3)))
+                ys.update((round(p.cy, 3), round(p.cy - p.r, 3), round(p.cy + p.r, 3)))
+        marks.append((v, sorted(xs), sorted(ys)))
+
+    def measures(axis, c, lo, hi, tol=0.006, gap=1.2):
+        for v, xs, ys in marks:
+            ks = xs if axis == 0 else ys
+            near = (v.y0 - gap < c < v.y1 + gap) if axis == 0 else (v.x0 - gap < c < v.x1 + gap)
+            if near and any(abs(k - lo) < tol for k in ks) and any(abs(k - hi) < tol for k in ks):
+                return True
+        return False
+
+    ratios = []
+    for L in text_lines:
+        t = L["text"].strip()
+        if not re.fullmatch(r"\d+(\.\d+)?", t) or float(t) == 0:
+            continue
+        v = float(t) / (25.4 if mm else 1.0)
+        tx, ty = (L["x0"] + L["x1"]) / 2, L["yc"]
+        best = None
+        for axis, c, lo, hi in segs:
+            along, across = (tx, ty) if axis == 0 else (ty, tx)
+            off = abs(across - c)
+            if lo < along < hi and off < 0.4 and (best is None or off < best[0]):
+                best = (off, axis, c, lo, hi)
+        if best and measures(*best[1:]):
+            ratios.append(v / (best[4] - best[3]))
+    if len(ratios) < 2:
+        return None
+    med = statistics.median(ratios)
+    agree = [r for r in ratios if abs(r / med - 1) < 0.015]
+    if len(agree) < (len(ratios) if len(ratios) == 2 else max(3, (len(ratios) + 1) // 2 + 1)):
+        return None
+    return statistics.median(agree)
+
+
+def drawing_units(text_lines):
+    """"mm" when the sheet says its dimensions are in millimetres ("DIMENSIONS ARE IN MILLIMETRES",
+    "UNITS: MM", ...), "inch" when it says inches, else None"""
+    for L in text_lines:
+        t = L["text"].upper()
+        if re.search(r"MILLIMET|\b(DIMENSIONS?|UNITS?)\b.*\bMM\b", t):
+            return "mm"
+        if re.search(r"\b(DIMENSIONS?|UNITS?)\b.*\bINCH", t):
+            return "inch"
+    return None
+
+
 def sheet_scale(text_lines):
     """the title block's SCALE n:m (the lowest SCALE on the sheet; detail views carry their own) -> n/m as
     model units per paper unit, e.g. 3.0 for 1:3"""
@@ -138,6 +213,7 @@ def parse_callout(text):
     """fuzzy parse of a hole note as OCR reads it. Returns dict or None.
     Diameter signs come out as O, 0, @, (c), D; the depth sign as V or v; the c'bore sign as L_I, LJ, U, |_|"""
     t = text.replace("\u00a9", "@").replace("\u00d8", "@").replace("\u2300", "@")
+    t = re.sub(r"(?<![\d.])0(?=\d)", "@", t)        # OCR reads the diameter sign as 0: "03.5" is @3.5
     up = t.upper()
     out = {}
     m = re.match(r"\s*(\d+)\s*[XxK]\b", t)
@@ -169,8 +245,13 @@ def parse_callout(text):
         m = re.match(r"\s*(?:L|\||U|\u2334)[_\s]*[IJ]?\s*[@O0D]\s*(\d*\.\d+?)(\.\d+)\s*$", up)
     if m and not re.match(r"\s*\d+\s*X", up):     # a counterbore line: (c'bore sign) dia (depth sign) depth
         return dict(cbore_d=float(m.group(1)), cbore_depth=float(m.group(2)))
-    # drill diameter: a decimal after a diameter sign (or the first bare decimal)
-    m = re.search(r"[@OD]\s*" + NUM, up.split("L_I")[0].split("LJ")[0])
+    # countersink: "CSK @6.5 X 90" (the angle defaults to 90 deg)
+    m = re.search(r"(?:CSK|⌵)\s*[@OD]?\s*(\d+(?:\.\d+)?|\.\d+)(?:\s*X\s*(\d+(?:\.\d+)?))?", up)
+    if m:
+        out["csk_d"] = float(m.group(1)); out["csk_angle"] = float(m.group(2) or 90)
+    # drill diameter: a decimal after a diameter sign, or a whole number after @ (Ø20 in a mm drawing)
+    head = up.split("L_I")[0].split("LJ")[0].split("CSK")[0]
+    m = re.search(r"[@OD]\s*" + NUM, head) or re.search(r"@\s*(\d+)\b", head)
     if m:
         out["dia"] = float(m.group(1))
     if not ({"thread", "dia", "cbore_d"} & set(out)) or not ({"thru", "depth", "count", "thread"} & set(out)):

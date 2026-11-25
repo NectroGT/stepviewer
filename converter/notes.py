@@ -8,21 +8,50 @@ def leader_tips(note, thin_lines, reach=0.08, join=0.012):
     x0, y0, x1, y1 = note["x0"] - reach, note["y0"] - reach, note["x1"] + reach, note["y1"] + reach
     segs = [(p.pts[0], p.pts[-1]) for p in thin_lines if math.dist(p.pts[0], p.pts[-1]) > 0.02]
     inbox = lambda q: x0 <= q[0] <= x1 and y0 <= q[1] <= y1
+    def crosses(a, b):                         # a line running under / through the note (an underline
+        if inbox(a) or inbox(b):               # sticking out past both ends of the text)
+            return False
+        from shapely.geometry import LineString, box
+        return LineString([a, b]).intersects(box(x0, y0, x1, y1))
     tips = []
     for a, b in segs:
+        under = crosses(a, b)
         for s_, e_ in ((a, b), (b, a)):
-            if not inbox(s_) or inbox(e_):
+            if not under and (not inbox(s_) or inbox(e_)):
                 continue
-            cur, seen = e_, {(a, b)}
+            cur, prev, seen = e_, s_, {(a, b)}
             for _ in range(4):                 # a leader may bend once or twice
                 nxt = next(((c, d) for c, d in segs if (c, d) not in seen and
                             (math.dist(c, cur) < join or math.dist(d, cur) < join)), None)
                 if nxt is None:
                     break
                 seen.add(nxt)
-                cur = nxt[1] if math.dist(nxt[0], cur) < join else nxt[0]
-            tips.append(cur)
+                prev, cur = cur, (nxt[1] if math.dist(nxt[0], cur) < join else nxt[0])
+            tips.append(_through_arrow(cur, prev, segs, join))
     return tips
+
+
+def _through_arrow(cur, prev, segs, join):
+    """a leader that ends on the back edge of an arrow head drawn as an outline: the arrow's tip is where
+    it points - the corner of the head farthest along the leader"""
+    L = math.dist(cur, prev)
+    if L < 1e-9:
+        return cur
+    ux, uy = (cur[0] - prev[0]) / L, (cur[1] - prev[1]) / L
+    base = [(c, d) for c, d in segs if math.dist(c, d) < 0.25 and _seg_dist(cur, c, d) < join
+            and min(math.dist(c, cur), math.dist(d, cur)) > join]
+    if not base:
+        return cur
+    # the head's corners: the back edge's ends and the far ends of the short sides joined to them
+    corners = {q for c, d in base for q in (c, d)}
+    for c, d in segs:
+        if math.dist(c, d) < 0.25:
+            for q, o in ((c, d), (d, c)):
+                if any(math.dist(q, k) < join for k in list(corners)):
+                    corners.add(o)
+    ahead = [((q[0] - cur[0]) * ux + (q[1] - cur[1]) * uy, q) for q in corners]
+    best = max(ahead, default=(0, cur))
+    return best[1] if best[0] > join else cur
 
 
 def _seg_dist(p, a, b):
@@ -86,7 +115,7 @@ def apply_hole(h, info, T, notes, label):
         tag.append(info["thread"])
     elif "dia" in info and abs(info["dia"] / 2 - r0) < 0.15 * r0:
         r0 = info["dia"] / 2
-    if info.get("thru"):
+    if info.get("thru") or ("csk_d" in info and "depth" not in info):     # a countersunk hole goes through
         side0, d0 = "thru", T
     elif "depth" in info and info["depth"] < T:
         if side0 == "thru":

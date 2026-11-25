@@ -118,6 +118,21 @@ def build(pm):
                 body = body.cut(cq.Workplane("XY").workplane(offset=z0).center(h.x, h.y).circle(r).extrude(hh))
             except Exception as e:
                 pm.notes.append(f"hole at ({h.x}, {h.y}) skipped ({type(e).__name__})")
+        if h.csk:
+            # countersink: a cone from the csk diameter at the face down to the drill, run a little past the face
+            R, ang, side, zf = (tuple(h.csk) + (None,))[:4]
+            r0 = min(r for r, _, _ in h.steps)
+            k = math.tan(math.radians(ang / 2))
+            hc, e = (R - r0) / k, 0.01
+            if hc > 0:
+                up = -1 if side == "top" else 1                # "top": the face looks up, the cone goes down
+                face = zf if zf is not None else (T if side == "top" else 0.0)
+                z = face - up * e
+                try:
+                    cone = cq.Solid.makeCone(R + e * k, r0, hc + e, cq.Vector(h.x, h.y, z), cq.Vector(0, 0, up))
+                    body = body.cut(cq.Workplane().add(cone))
+                except Exception as ex:
+                    pm.notes.append(f"countersink at ({h.x}, {h.y}) skipped ({type(ex).__name__})")
     for sh in pm.side_holes:
         (x, y), (dx, dy) = sh.entry, sh.direction
         try:
@@ -154,8 +169,15 @@ def _turned(pm):
         body = cq.Workplane("XY").polyline(prof).close().revolve(360, (0, 0, 0), (0, 1, 0))
         ymin, ymax = half.bounds[1], half.bounds[3]
         for r, d, where, cham in bores:
-            y0 = ymax - d if where == "above" else ymin
-            body = body.cut(cq.Workplane("XZ").workplane(offset=-y0).circle(r).extrude(-d))
+            # from the mouth (run 0.01 out past that face) to depth d; a bore that reaches the far face is run
+            # past it too, else a cut ending exactly on the face leaves a paper-thin skin over the bore
+            if where == "above":
+                ya, yb = ymax - d, ymax + 0.01
+                ya = ymin - 0.01 if ya <= ymin + 1e-4 else ya
+            else:
+                ya, yb = ymin - 0.01, ymin + d
+                yb = ymax + 0.01 if yb >= ymax - 1e-4 else yb
+            body = body.cut(cq.Workplane("XZ").workplane(offset=-ya).circle(r).extrude(-(yb - ya)))
             if cham > 0:
                 # 45 deg cone at the mouth: r + cham at the end face down to r, run a little past the face
                 ym, s, e = (ymax, 1, 0.01) if where == "above" else (ymin, -1, 0.01)

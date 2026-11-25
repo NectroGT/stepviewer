@@ -43,7 +43,7 @@ def cutting_lines(prims, plan):
     return [(u, k) for (k, u), L in tot.items() if L > 0.5 * (plan.y1 - plan.y0 if k == "v" else plan.x1 - plan.x0)]
 
 
-def apply_sections(body, pm, plan, scale, prims, sections, snap=0.0005):
+def apply_sections(body, pm, plan, scale, prims, sections, snap=None):
     """cut away what the sections show as empty. body: CadQuery Workplane in model units (origin = plan corner)."""
     T = pm.thickness
     notes = []
