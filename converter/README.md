@@ -50,6 +50,53 @@ Each drawing is converted and compared with its model in whichever of the 24 qua
 more faces means curves came out as flat facets). It exits with an error when a part fails or its overlap is below
 `--min` (0.995), so run it after every change to the converter.
 
+## Converting with Claude (vlm.py)
+`vlm.py` is a second route from drawing to model: Claude reads the sheet and writes the part as CadQuery code, using
+the converter's exact measurements, and corrects it until its views match the drawing. It runs through Claude Code
+on your Claude subscription (no API key, no per-use charge; it counts toward your plan's usage limits).
+```
+python vlm.py drawing.pdf -o out/                     # rules first, Claude only if needed; out/model.step in mm
+python vlm.py drawing.pdf -o out/ --claude-only       # straight to Claude
+python vlm.py drawing.pdf -o out/ --rounds 4 --effort xhigh
+python check_refs.py path/to/folder --method auto     # score it against reference models (--method vlm: Claude only)
+```
+By default the free rules converter (`pdf2step.py`) goes first. Its model is turned into the drawing's frame
+(whichever quarter turn fits the drawing's size and agrees best) and checked as below; Claude is called only when it
+fails. `report.json` says which route made the model (`"route": "rules"` or `"claude"`).
+
+**The check**, per view (top, front, end): the outer outline of the model's view against the drawing's
+(overlap, 1.0 = same), and its visible edges against the drawing's visible lines: `drawing_explained` is the share
+of the drawing's line length lying within 0.2 mm of a model edge. Outlines alone miss what is inside them (a channel,
+a pocket, a step); the edges show it. A model matches when the mean overlap is 0.998 or more and every view's
+`drawing_explained` is 0.93 or more (exact models score 0.94-1.0; a base missing its channel, with matching
+outlines, scored 0.35-0.56). The other direction (`model_explained`) is only fed back to Claude, since drawings
+leave out some edges.
+1. The converter reads the drawing: views, scale (measured from the dimensions when the title block is wrong), units,
+   text and hole notes, and puts each view's outline, edges and circles into one frame in millimetres (x along the
+   part, y from the front face backwards, z up; top view = (x, y), front = (x, z), end = (y, z)).
+2. Claude (Opus) gets the sheet image plus those numbers and writes a `build()` function. Each round is one
+   `claude -p` call resuming the same session; Claude gets only the Read tool (to look at the images), so it cannot
+   edit files or run commands.
+3. The code runs in a separate Python process (3 minutes at most). Its model is projected back into the three views
+   and checked (outlines and edges, above). The error, the scores, where the drawing's lines lack a model edge, and a
+   picture of the model's views over the drawing go back to Claude for the next round.
+4. It stops as soon as it can:
+   - the outlines and edges match: Claude gets one review round to check what is inside them
+     (holes, countersinks, pockets, channels, hidden edges) and answers MATCHES or corrects it - so a part right
+     first time takes 2 calls. `--no-review` stops as soon as they match (1 call);
+   - two attempts in a row do not improve the score (outline overlap and edges; after the first, Claude is sent the
+     best attempt's code to start from), Claude sends the same code again, or answers MATCHES;
+   - `--rounds` (default 3) is reached.
+   The newest of the best-scoring attempts is saved as `model.step` (a correction the check cannot see does not
+   change the score); every attempt (`attempt_N.py/.step/.png`), the context sent and `report.json` (scores, why it
+   stopped, time) are kept in `out/`.
+
+Needs Claude Code signed in to your Claude account. `claude` on the PATH is used, else the copy bundled with the
+Claude Code extension for VS Code; set `CLAUDE_CLI` to use another. `--backend api` uses the Claude API instead
+(`pip install anthropic`, an API key, billed per token). The drawing image and the text read from it are sent to
+Claude, so do not use it for drawings that must not leave this computer. The code Claude writes runs on this
+computer (in its own process, with a time limit); read `attempt_N.py` if in doubt.
+
 ## How it works
 1. **Reads the lines, not a picture.** The PDF keeps the drawing as true lines, arcs and circles. Thick
    strokes are visible edges; thin strokes are hidden / centre / dimension lines; filled shapes (text, arrow

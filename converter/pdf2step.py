@@ -197,7 +197,7 @@ def run(pdf, page, scale, out, units="inch", words=None):
             if sheet_note:
                 pm.notes.append(sheet_note)
             if notes and not turned:
-                _apply_notes(pm, notes, [p for p in prims if p.cls == "thin"], details, side, plan, pscale)
+                _apply_notes(pm, notes, [p for p in prims if p.cls in ("thin", "hatch")], details, side, plan, pscale)
             prisms = view_prisms(pm, plan, side, ends.get(id(plan)), pscale) if not turned and not pm.turned else []
             body = build(pm)
             secs = [s for s in sections if s["view"] not in [v for _, v in side]]
