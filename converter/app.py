@@ -3,7 +3,7 @@ preview them in 3D and download the STEP files.
 
 usage: python app.py            then open http://127.0.0.1:5000
 Pages are scanned and converted side by side in worker processes (scan.workers() of them)."""
-import io, json, os, shutil, sys, threading, time, traceback, uuid, warnings, zipfile
+import collections, io, json, os, shutil, sys, threading, time, traceback, uuid, warnings, zipfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 warnings.filterwarnings("ignore")
 
@@ -14,9 +14,9 @@ import pymupdf
 from flask import Flask, jsonify, request, send_file, send_from_directory, abort, redirect
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-JOBS = os.path.join(HERE, "web_jobs")
+JOBS = os.environ.get("PDF2STEP_JOBS") or os.path.join(HERE, "web_jobs")   # the desktop app keeps them in its user folder
 # the STP viewer from the same repo (stepviewer/site): served at /viewer/ so converted parts open in it
-SITE = os.path.normpath(os.path.join(HERE, "..", "site"))
+SITE = os.environ.get("PDF2STEP_SITE") or os.path.normpath(os.path.join(HERE, "..", "site"))
 HAS_VIEWER = os.path.isfile(os.path.join(SITE, "index.html"))
 os.makedirs(JOBS, exist_ok=True)
 
@@ -37,6 +37,44 @@ def pool():
             import scan
             _pool = scan.pool()
         return _pool
+
+
+# Work waits here, not in the pool's own first-come queue, so a conversion you asked for goes ahead of
+# pages still waiting to be scanned. Only as many tasks as there are workers are handed to the pool.
+_waiting = {"convert": collections.deque(), "scan": collections.deque()}
+_running = 0
+
+
+def schedule(kind, fn, args, kwargs, on_start, on_done):
+    """queue fn(*args, **kwargs) for a worker; on_start(future) runs when a worker takes it (lock held),
+    on_done(future) when it has finished"""
+    with lock:
+        _waiting[kind].append((fn, args, kwargs, on_start, on_done))
+        _dispatch()
+
+
+def _dispatch():
+    global _running
+    import scan
+    with lock:
+        while _running < scan.workers() and (_waiting["convert"] or _waiting["scan"]):
+            fn, args, kwargs, on_start, on_done = (_waiting["convert"] or _waiting["scan"]).popleft()
+            _running += 1
+            fut = pool().submit(fn, *args, **kwargs)
+            on_start(fut)
+            fut.add_done_callback(lambda f, cb=on_done: _finished(f, cb))
+
+
+def _finished(fut, on_done):
+    global _running
+    try:
+        on_done(fut)
+    except Exception:
+        traceback.print_exc()
+    finally:
+        with lock:
+            _running -= 1
+            _dispatch()
 
 
 # ---------------------------------------------------------------- scanning and converting
@@ -66,11 +104,10 @@ def start_scan(job):
             if not left[0]:
                 job["scanned"] = True; job["scan_time"] = round(time.time() - job["created"], 1)
 
-    ex = pool()
-    for i in order:
-        with lock:
-            job["pages"][i]["scan"] = "scanning"
-        ex.submit(scan.scan_page, job["pdf"], i).add_done_callback(lambda fut, n=i + 1: done(fut, n))
+    for i in order:                            # pages show "waiting" until a worker takes them
+        schedule("scan", scan.scan_page, (job["pdf"], i), {},
+                 lambda fut, i=i: job["pages"][i].update(scan="scanning"),
+                 lambda fut, n=i + 1: done(fut, n))
 
 
 def start_convert(job, n):
@@ -86,8 +123,9 @@ def start_convert(job, n):
         with open(wpath, encoding="utf-8") as f:
             words = [tuple(w) for w in json.load(f)]
     out = os.path.join(job["dir"], f"p{n:02d}")
-    fut = pool().submit(convert_page, job["pdf"], n, p.get("scale"), out, words=words)
-    futures[(job["id"], n)] = fut
+
+    def started(fut):                          # a worker has taken it: shows as "converting"
+        futures[(job["id"], n)] = fut
 
     def done(fut):
         with lock:
@@ -106,7 +144,7 @@ def start_convert(job, n):
             if p["convert"] == "failed" and not parts:
                 p["convert_error"] = "no part could be built from this page"
 
-    fut.add_done_callback(done)
+    schedule("convert", convert_page, (job["pdf"], n, p.get("scale"), out), {"words": words}, started, done)
 
 
 # ---------------------------------------------------------------- routes

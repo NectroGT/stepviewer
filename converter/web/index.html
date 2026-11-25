@@ -166,6 +166,14 @@ $("#onlyUsable").onchange = () => job && render(job);
 $("#convertAll").onclick = () => post({ pages: "usable" });
 $("#zip").onclick = (e) => { if ($("#zip").classList.contains("off")) e.preventDefault(); };
 
+// released (after the click has fired): let the cards catch up with status updates held back meanwhile
+const release = () => setTimeout(() => {
+  document.querySelectorAll(".card.held").forEach((c) => c.classList.remove("held"));
+  if (job && job.pages) render(job);
+});
+document.addEventListener("pointerup", release);
+document.addEventListener("pointercancel", release);
+
 async function post(body) {
   await fetch(`/api/job/${job.id}/convert`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   clearTimeout(timer); poll();
@@ -176,6 +184,7 @@ async function poll() {
   if (!r.ok) { $("#summary").textContent = "This upload is no longer on the server - upload the file again."; return; }
   job = await r.json(); render(job);
   const busy = !job.scanned || job.pages.some((p) => ["queued", "converting"].includes(p.convert));
+  clearTimeout(timer); // a click's poll() may overlap the regular one: keep a single timer going
   timer = setTimeout(poll, busy ? 1000 : 5000);
 }
 
@@ -210,10 +219,19 @@ function render(j) {
       c = document.createElement("div"); c.className = "card"; c.dataset.job = j.id;
       c.innerHTML = `<div class="thumb"><img loading="lazy" alt="page ${p.page}" src="/api/job/${j.id}/thumb/${p.page}.png"></div><div class="body"></div>`;
       c.querySelector(".thumb").onclick = () => showPage(p.page);
+      c.addEventListener("pointerdown", () => c.classList.add("held"));
+      c.addEventListener("focusout", () => setTimeout(() => job && job.pages && render(job))); // catch up after typing
       $("#grid").appendChild(c); cards[p.page] = c;
     }
     const key = JSON.stringify(p);
-    if (c.dataset.key !== key) { c.dataset.key = key; c.querySelector(".body").innerHTML = cardBody(p); wire(c, p); }
+    // Rebuilding the card while a button is held down loses the click (it needs press and release on
+    // the same button), and while you type a scale it would wipe what you typed: wait until you're done.
+    if (c.dataset.key !== key && !c.matches(".held") && !c.contains(document.activeElement)) {
+      const typed = c.querySelector(".scale")?.value;
+      c.dataset.key = key; c.querySelector(".body").innerHTML = cardBody(p); wire(c, p);
+      const sc = c.querySelector(".scale");
+      if (sc && typed && !p.convert) sc.value = typed; // a scale typed but not yet used survives a status update
+    }
     c.classList.toggle("dim", p.scan === "none" || p.scan === "error");
     c.style.display = only && p.scan !== "usable" && !p.convert ? "none" : "";
   }
@@ -278,7 +296,12 @@ function partBox(p, r) {
 
 function wire(c, p) {
   const go = c.querySelector(".go");
-  if (go) go.onclick = () => post({ pages: [p.page], scale: c.querySelector(".scale").value || null });
+  if (go) go.onclick = () => {
+    // show it straight away; the next status update from the server takes over
+    go.disabled = true; go.classList.remove("primary");
+    go.innerHTML = `<span class="spin"></span> queued`;
+    post({ pages: [p.page], scale: c.querySelector(".scale").value || null });
+  };
   c.querySelectorAll(".v3d").forEach((b) => b.onclick = () => show3d(p.page, b.dataset.name, b.dataset.ref));
 }
 
