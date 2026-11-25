@@ -183,7 +183,7 @@ async function poll() {
   const r = await fetch(`/api/job/${job.id}`);
   if (!r.ok) { $("#summary").textContent = "This upload is no longer on the server - upload the file again."; return; }
   job = await r.json(); render(job);
-  const busy = !job.scanned || job.pages.some((p) => ["queued", "converting"].includes(p.convert));
+  const busy = !job.scanned || job.pages.some((p) => ["queued", "converting"].includes(p.convert) || p.claude === "running");
   clearTimeout(timer); // a click's poll() may overlap the regular one: keep a single timer going
   timer = setTimeout(poll, busy ? 1000 : 5000);
 }
@@ -254,9 +254,10 @@ function cardBody(p) {
   } else if (p.reason) {
     h += `<div class="${p.scan === "error" ? "err" : "info"}">${esc(p.reason)}</div>`;
   }
-  const busy = ["queued", "converting"].includes(p.convert);
+  const busy = ["queued", "converting"].includes(p.convert) || p.claude === "running";
   if (p.scan !== "waiting" && p.scan !== "scanning") {
-    const label = busy ? `<span class="spin"></span> ${p.convert === "queued" ? "queued" : "converting"}` : (p.convert ? "Convert again" : "Convert to 3D");
+    const label = p.claude === "running" ? "Convert again" :
+                  busy ? `<span class="spin"></span> ${p.convert === "queued" ? "queued" : "converting"}` : (p.convert ? "Convert again" : "Convert to 3D");
     const primary = p.scan === "usable" && !p.convert ? "primary" : "";
     h += `<div class="row"><button class="go ${primary}" ${busy ? "disabled" : ""}>${label}</button>` +
          `<span class="info">scale 1:</span><input type="number" class="scale" min="0" step="any" placeholder="auto" value="${p.scale || ""}" title="leave empty to read it from the title block"></div>`;
@@ -278,19 +279,46 @@ function viewerLink(page, name) {
   return "/viewer/?open=" + encodeURIComponent(`/api/job/${job.id}/file/${page}/${encodeURIComponent(name)}.step`);
 }
 
+// the check: the model's views against the drawing's (outlines and the lines inside them)
+function checkBadge(p, r) {
+  const c = r.check;
+  if (!c) return "";
+  if (c.error) return `<span class="badge" title="${esc("not checked: " + c.error)}">not checked</span>`;
+  const per = Object.entries(c.views || {}).map(([v, x]) =>
+    `${v}: outline ${(100 * x.overlap).toFixed(1)}%` + (x.edges != null ? `, lines ${(100 * x.edges).toFixed(0)}%` : "")).join("\n");
+  const tip = (c.matched ? "The model's views match the drawing" : "The model's views differ from the drawing") +
+              " (outline overlap, and the share of the drawing's lines the model has).\n" + per + "\nClick to see the comparison.";
+  return `<button class="badge chkimg ${c.matched ? "ok" : "warn"}" data-name="${esc(r.name)}" title="${esc(tip)}" style="border:0">` +
+         `${c.matched ? "✓ matches drawing" : "differs from drawing"}</button>`;
+}
+
+function claudeRow(p, r) {
+  if (r.by === "claude" || !r.check || r.check.error || r.check.matched) return "";
+  if (p.claude === "running") return `<div class="info"><span class="spin"></span> Claude: ${esc(p.claude_status || "working")}</div>`;
+  if (p.claude === "done") return "";
+  let h = "";
+  if (p.claude === "failed") h += `<div class="err">Claude: ${esc(p.claude_error || "failed")}</div>`;
+  if (!job.claude_ok) return h + `<div class="info">Claude Code is not set up on this computer, so it cannot fix this part.</div>`;
+  return h + `<div class="row"><button class="claude" data-name="${esc(r.name)}" title="Sends this page (image and the measurements read from it) to Claude, which builds the part and corrects it against the drawing. Uses your Claude subscription; takes 1-3 minutes.">Fix with Claude</button>` +
+             `<span class="info">sends this page to Claude</span></div>`;
+}
+
 function partBox(p, r) {
   if (!r.built) return `<div class="part"><div class="row"><b>${esc(r.name)}</b><span class="badge bad">failed</span></div><div class="err">${esc(r.error)}</div></div>`;
   const sz = r.size_mm.map((v) => v.toFixed(1)).join(" × ");
-  const facts = [`${sz} mm`, `${r.holes} hole${r.holes === 1 ? "" : "s"}`];
+  const facts = [`${sz} mm`];
+  if (r.by === "claude") facts.push(`made by Claude (${r.calls} call${r.calls === 1 ? "" : "s"}, ${Math.round(r.seconds || 0)} s)`);
+  else facts.push(`${r.holes} hole${r.holes === 1 ? "" : "s"}`);
   if (r.side_holes) facts.push(`${r.side_holes} edge hole${r.side_holes === 1 ? "" : "s"}`);
   if (r.cuts) facts.push(`${r.cuts} cut-out${r.cuts === 1 ? "" : "s"}`);
   if (r.threads && r.threads.length) facts.push("threads " + r.threads.join(", "));
-  facts.push("scale 1:" + r.scale);
-  return `<div class="part"><div class="row"><b>${esc(r.name)}</b><span>
+  if (r.scale) facts.push("scale 1:" + r.scale);
+  return `<div class="part"><div class="row"><span><b>${esc(r.name)}</b> ${checkBadge(p, r)}</span><span>
       <button class="v3d" data-name="${esc(r.name)}" data-ref="${esc(r.ref || "")}">View 3D</button>
       ${VIEWER ? `<a class="btn" href="${viewerLink(p.page, r.name)}" target="_blank" rel="noopener" title="Open in the STP viewer: measure, cut, weight">Open in viewer</a>` : ""}
       <a class="btn" href="/api/job/${job.id}/file/${p.page}/${encodeURIComponent(r.name)}.step" download title="Download the STEP file" aria-label="Download the STEP file"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 20h14"/></svg></a></span></div>
     <div class="info">${esc(facts.join(" · "))}</div>
+    ${claudeRow(p, r)}
     </div>`;
 }
 
@@ -303,6 +331,14 @@ function wire(c, p) {
     post({ pages: [p.page], scale: c.querySelector(".scale").value || null });
   };
   c.querySelectorAll(".v3d").forEach((b) => b.onclick = () => show3d(p.page, b.dataset.name, b.dataset.ref));
+  c.querySelectorAll(".chkimg").forEach((b) => b.onclick = () =>
+    showImage(`${b.dataset.name}: model (black) over the drawing (red)`, `/api/job/${job.id}/file/${p.page}/${encodeURIComponent(b.dataset.name)}_check.png`));
+  c.querySelectorAll(".claude").forEach((b) => b.onclick = async () => {
+    b.disabled = true; b.innerHTML = `<span class="spin"></span> starting`;
+    const r = await fetch(`/api/job/${job.id}/claude`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ page: p.page, name: b.dataset.name }) });
+    if (!r.ok) alert((await r.json().catch(() => ({}))).error || "Could not start Claude");
+    clearTimeout(timer); poll();
+  });
 }
 
 // ------------------------------------------------ viewers
@@ -319,10 +355,12 @@ function closeModal() {
   $("#ref").style.display = "none";
 }
 
-function showPage(n) {
+function showPage(n) { showImage(`Page ${n}`, `/api/job/${job.id}/thumb/${n}.png`); }
+
+function showImage(title, src) {
   closeModal();
-  $("#mtitle").textContent = `Page ${n}`; $("#mdl").style.display = "none"; $("#mview").style.display = "none";
-  holder.innerHTML = `<img class="page" src="/api/job/${job.id}/thumb/${n}.png">`;
+  $("#mtitle").textContent = title; $("#mdl").style.display = "none"; $("#mview").style.display = "none";
+  holder.innerHTML = `<img class="page" src="${src}">`;
   modal.style.display = "flex";
 }
 

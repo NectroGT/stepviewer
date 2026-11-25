@@ -28,6 +28,13 @@ it is only shown, never used to build the model), and download the STEP files on
 side by side in up to 4 worker processes; the text read by the scan is kept, so converting does not run OCR again.
 Uploads and results are kept in `web_jobs/`.
 
+**Check and Fix with Claude:** each converted part (pages with one part) is checked against the drawing (its
+views' outlines and the lines inside them; see "Converting with Claude" below) and marked **matches drawing** or
+**differs from drawing**; click the mark to see the model's views over the drawing's. A part that differs gets a
+**Fix with Claude** button when Claude Code is on the computer running the app: Claude builds the page's part
+(1-3 minutes, on that computer's Claude subscription) and it is added beside the converter's as `<name>_claude`,
+with its own check. Only that button sends anything out: the page image and what was read from it go to Claude.
+
 **Open in viewer:** the app also serves the ConnectIQ STP Viewer from this repo (`../site`) at
 `http://127.0.0.1:5000/viewer/`. Each converted part has an **Open in viewer** button that opens its STEP file
 there in a new tab, with measuring, the cut plane, weight estimates and compare. The file goes from this

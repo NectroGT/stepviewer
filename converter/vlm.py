@@ -59,8 +59,9 @@ and cut features. Before the code block, list in a few lines the features you fo
 
 # ------------------------------------------------------------------ reading the drawing
 
-def read_drawing(pdf, page=1):
-    """the converter's reading of one sheet: views in the model frame (mm), text, notes and a sheet image"""
+def read_drawing(pdf, page=1, scale=None):
+    """the converter's reading of one sheet: views in the model frame (mm), text, notes and a sheet image.
+    scale: 1:scale as entered by the user (None: from the title block / the dimensions)"""
     import pymupdf
     from extract import page_prims
     from views import find_views
@@ -74,8 +75,11 @@ def read_drawing(pdf, page=1):
     tl = lines(read_words(pdf, page - 1))
     mm = drawing_units(tl) == "mm"
     views = find_views(prims, size)
-    scale, scale_note = sheet_scale(tl), "from the title block"
-    ds = dimension_scale(prims, tl, mm, views)
+    if scale:
+        scale, scale_note, ds = float(scale), "as entered", None
+    else:
+        scale, scale_note = sheet_scale(tl), "from the title block"
+        ds = dimension_scale(prims, tl, mm, views)
     if ds and (scale is None or abs(ds / scale - 1) > 0.03):
         scale, scale_note = ds, "measured from the dimension lines (the title block scale does not match the sheet)"
     if scale is None:
@@ -392,11 +396,11 @@ def _same_code(a, b):
     return norm(a) == norm(b)
 
 
-def generate(pdf, out, page=1, rounds=3, effort="high", backend="claude-code", review=True, log=print):
+def generate(pdf, out, page=1, rounds=3, effort="high", backend="claude-code", review=True, log=print, scale=None):
     out = os.path.abspath(out)
     os.makedirs(out, exist_ok=True)
     t0 = time.time()
-    d = read_drawing(pdf, page)
+    d = read_drawing(pdf, page, scale)
     sheet = os.path.join(out, "sheet.png")
     open(sheet, "wb").write(d["image_png"])
     open(os.path.join(out, "context.json"), "w", encoding="utf-8").write(context_text(d))
@@ -556,14 +560,14 @@ def oriented(shape, d, tol=0.5):
     return best
 
 
-def rules_attempt(pdf, out, page, d):
+def rules_attempt(pdf, out, page, d, scale=None):
     """the rules converter's model of the page, checked like Claude's attempts: (step path, scores, summary), or
     (None, None, dict(error=...)) when it builds nothing"""
     import cadquery as cq
     from pdf2step import run
     rdir = os.path.join(out, "rules")
     try:
-        res = run(pdf, page, None, rdir)
+        res = run(pdf, page, scale, rdir)
     except BaseException as e:                       # SystemExit too: run() exits when it cannot read the scale
         return None, None, dict(error=f"{type(e).__name__}: {e}")
     built = [r for r in res if "size_mm" in r]
@@ -582,15 +586,15 @@ def rules_attempt(pdf, out, page, d):
     return step, scores, summ
 
 
-def convert(pdf, out, page=1, rounds=3, effort="high", backend="claude-code", review=True, log=print):
+def convert(pdf, out, page=1, rounds=3, effort="high", backend="claude-code", review=True, log=print, scale=None):
     """the free rules converter first; Claude (generate) only when its model does not match the drawing's
     outlines and edges. Writes out/model.step either way; the report says which route made it ("route")."""
     import shutil
     out = os.path.abspath(out)
     os.makedirs(out, exist_ok=True)
     t0 = time.time()
-    d = read_drawing(pdf, page)
-    step, scores, summ = rules_attempt(pdf, out, page, d)
+    d = read_drawing(pdf, page, scale)
+    step, scores, summ = rules_attempt(pdf, out, page, d, scale)
     rules = dict(summ, scores=scores) if scores else summ
     if step and summ.get("matched"):
         shutil.copyfile(step, os.path.join(out, "model.step"))
@@ -602,10 +606,40 @@ def convert(pdf, out, page=1, rounds=3, effort="high", backend="claude-code", re
         return report
     log("rules converter: " + (f"overlap {summ['mean_overlap']:.4f}, edges {summ['edges']:.3f} - does not match"
                                if step else summ["error"]) + "; asking Claude")
-    report = generate(pdf, out, page, rounds, effort, backend, review, log)
+    report = generate(pdf, out, page, rounds, effort, backend, review, log, scale)
     report.update(route="claude", rules=rules, seconds=round(time.time() - t0, 1))
     json.dump(report, open(os.path.join(out, "report.json"), "w", encoding="utf-8"), indent=1, default=str)
     return report
+
+
+def check_part(pdf, page, step, scale=None, png=None):
+    """the check for a model already built (the web app's badge): dict(matched, mean_overlap, edges, views) or
+    dict(error=...). png: also draw the model's views over the drawing's outlines there"""
+    try:
+        import cadquery as cq
+        d = read_drawing(pdf, page, scale)
+        s, scores, summ = oriented(cq.importers.importStep(step).val(), d)
+        if png:
+            from vlm_views import render_views, moved_to_origin
+            render_views(moved_to_origin(s), d["views"], png, "the model's views (black) over the drawing's (red)")
+    except BaseException as e:                       # SystemExit too: read_drawing exits when it cannot read the scale
+        return dict(error=f"{type(e).__name__}: {e}")
+    return dict(matched=summ["matched"], mean_overlap=summ["mean_overlap"], edges=summ["edges"],
+                views={k: dict(overlap=v["overlap"], edges=v.get("edges", {}).get("drawing_explained"))
+                       for k, v in scores.items()})
+
+
+def convert_and_check(pdf, page, scale, out, words=None):
+    """pdf2step.convert_page, then the check on its part (pages with one part: the drawing reading the check
+    uses follows the page's first part only). Each checked part gets "check" and <name>_check.png."""
+    from pdf2step import convert_page
+    results = convert_page(pdf, page, scale, out, words=words)
+    built = [r for r in results if "size_mm" in r and os.path.exists(os.path.join(out, r["name"] + ".step"))]
+    if len(built) == 1:
+        r = built[0]
+        r["check"] = check_part(pdf, page, os.path.join(out, r["name"] + ".step"), scale,
+                                os.path.join(out, r["name"] + "_check.png"))
+    return results
 
 
 def main():

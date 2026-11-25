@@ -93,7 +93,10 @@ def find_views(prims, page_size, gap=0.08):
             host.prims.extend(v.prims)
         else:
             merged.append(v)
-    views = [View(v.prims) for v in merged if len(v.prims) >= 4]
+    def round_end(v):            # a plain round end view (a shaft seen end-on): only concentric circles
+        cs = [p for p in v.prims if p.kind == "circle"]
+        return len(cs) == len(v.prims) >= 2 and all(math.dist((c.cx, c.cy), (cs[0].cx, cs[0].cy)) < 1e-2 for c in cs)
+    views = [View(v.prims) for v in merged if len(v.prims) >= 4 or round_end(v)]
     W, H = page_size
     views = [v for v in views if not (v.w > 0.6 * W or v.h > 0.6 * H) and v.w * v.h > 0.01]
     # thin lines inside each view box (with margin) belong to it
