@@ -6,3 +6,5 @@ pdf2step_out/
 *.stp
 *.pdf
 web_jobs/
+dist/
+build/
