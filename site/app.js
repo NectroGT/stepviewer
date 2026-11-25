@@ -64,6 +64,7 @@
     markColor.set(v("--mark") || "#e0560b");
     accentColor.set(v("--accent") || "#1f5fd1");
     dimMat.color.set(v("--dim") || "#2f4a63");
+    stockMat.color.set(v("--stock") || "#0f9d8a"); stockLineMat.color.copy(stockMat.color);
     markGroup.children.forEach((m) => m.material && m.material.color && m.material.color.copy(markColor));
     if (faceOverlay) faceOverlay.material.color.copy(accentColor);
     selected.forEach((m) => m.material.emissive.copy(accentColor));
@@ -201,6 +202,7 @@
   function enterCompare(b) {
     if (!active || !b || b === active) return;
     if (cut.on) setCut(false);
+    if (stock.on) setStock(false);
     clearSelection(); clearMarks();
     if (cmp) scene.remove(cmp.b.group);
     cmp = { b }; b.group.visible = false; scene.add(b.group);
@@ -389,6 +391,7 @@
     updateModelBox();
     let radius = modelRadius; // while comparing, leave room for the bigger of the two models
     if (cmp) { const bb = visibleBox(cmp.b.meshes); if (!bb.isEmpty()) radius = Math.max(radius, bb.getBoundingSphere(new THREE.Sphere()).radius); }
+    if (stock.on) { updateStock(); const st = stockOf(stock.shape); if (st) radius = Math.max(radius, st.radius); } // the stock fits in view too
     const center = modelBox.getCenter(new THREE.Vector3());
     const d = dir ? dir.clone().normalize() : camera.position.clone().sub(controls.target).normalize();
     const fov = THREE.MathUtils.degToRad(camera.fov);
@@ -414,6 +417,7 @@
       dimsOn = !dimsOn; store.set("dims", dimsOn ? "1" : "0");
       b.setAttribute("aria-pressed", String(dimsOn)); requestRender();
     } else if (v === "cut") { if (!cmp) setCut(!cut.on); }
+    else if (v === "stock") { if (!cmp) setStock(!stock.on); }
     else if (v === "fit") frame(); else frame(...VIEWS[v]);
   }));
 
@@ -474,6 +478,133 @@
   });
   $("cutPos").addEventListener("input", (e) => { cut.t = e.target.value / 1000; requestRender(); });
   document.querySelector('.views [data-view="dims"]').setAttribute("aria-pressed", String(dimsOn));
+
+  // ---------- raw material (stock) ----------
+  // A see-through round bar, block or cube around the shown parts, centred on them and just big
+  // enough to hold them (plus an optional allowance on every side), with a table comparing the three:
+  // stock size, stock weight and how much of it would be machined away. Taps pass through it.
+  const stock = { on: false, shape: store.get("stockShape", "round"), axis: null, allow: parseFloat(store.get("stockAllow", "0")) || 0, fit: null, sig: "" };
+  if (!["round", "block", "cube"].includes(stock.shape)) stock.shape = "round";
+  const stockMat = new THREE.MeshBasicMaterial({ color: 0x0f9d8a, transparent: true, opacity: 0.14, depthWrite: false, side: THREE.DoubleSide });
+  const stockLineMat = new THREE.LineBasicMaterial({ color: 0x0f9d8a, transparent: true, opacity: 0.85 });
+  const stockObj = new THREE.Group(); stockObj.visible = false; stockObj.renderOrder = 6;
+  const unitGeo = { round: new THREE.CylinderGeometry(1, 1, 1, 72, 1), box: new THREE.BoxGeometry(1, 1, 1) };
+  const stockParts = {};
+  for (const [k, g] of Object.entries(unitGeo)) {
+    const mesh = new THREE.Mesh(g, stockMat), lines = new THREE.LineSegments(new THREE.EdgesGeometry(g, 20), stockLineMat);
+    mesh.raycast = () => {}; lines.raycast = () => {}; mesh.renderOrder = 6;
+    const holder = new THREE.Group(); holder.add(mesh, lines); holder.visible = false; stockObj.add(holder); stockParts[k] = holder;
+  }
+  scene.add(stockObj);
+
+  // smallest stock of each shape around the shown parts (sizes in mm, before the allowance)
+  function stockFit(list) {
+    const box = visibleBox(list); if (box.isEmpty()) return null;
+    const c = box.getCenter(new THREE.Vector3()), s = box.getSize(new THREE.Vector3());
+    // round bar along each axis: centred on the box, radius = farthest point from that axis
+    const r2 = { x: 0, y: 0, z: 0 };
+    list.forEach((m) => {
+      if (!m.visible) return;
+      const p = m.geometry.attributes.position.array;
+      for (let i = 0; i < p.length; i += 3) {
+        const dx = p[i] - c.x, dy = p[i + 1] - c.y, dz = p[i + 2] - c.z;
+        const yz = dy * dy + dz * dz, xz = dx * dx + dz * dz, xy = dx * dx + dy * dy;
+        if (yz > r2.x) r2.x = yz; if (xz > r2.y) r2.y = xz; if (xy > r2.z) r2.z = xy;
+      }
+    });
+    const round = {}; ["x", "y", "z"].forEach((k) => { round[k] = { r: Math.sqrt(r2[k]), len: s[k] }; });
+    return { center: c, size: s, round, best: ["x", "y", "z"].reduce((a, k) => (round[k].r ** 2 * round[k].len < round[a].r ** 2 * round[a].len ? k : a), "x") };
+  }
+  const stockAxis = () => stock.axis || (stock.fit && stock.fit.best) || "z";
+  // one shape's stock with the allowance: { dims for the label, volume mm³, half-size for framing }
+  function stockOf(shape) {
+    const f = stock.fit, a = stock.allow; if (!f) return null;
+    if (shape === "round") {
+      const k = stockAxis(), r = f.round[k].r + a, len = f.round[k].len + 2 * a;
+      return { shape, k, r, len, vol: Math.PI * r * r * len, radius: Math.hypot(r, len / 2) };
+    }
+    if (shape === "block") {
+      const x = f.size.x + 2 * a, y = f.size.y + 2 * a, z = f.size.z + 2 * a;
+      return { shape, x, y, z, vol: x * y * z, radius: Math.hypot(x, y, z) / 2 };
+    }
+    const e = Math.max(f.size.x, f.size.y, f.size.z) + 2 * a;
+    return { shape, e, vol: e ** 3, radius: e * Math.sqrt(3) / 2 };
+  }
+  const stockLen = (mm) => (unit === "in" ? (mm / 25.4).toFixed(3) : mm.toFixed(mm >= 1000 ? 0 : 1));
+  function stockSize(st) {
+    if (st.shape === "round") return `Ø${stockLen(2 * st.r)} × ${stockLen(st.len)} <small>${unit} · along ${st.k.toUpperCase()}</small>`;
+    if (st.shape === "block") return `${[st.x, st.y, st.z].sort((p, q) => q - p).map(stockLen).join(" × ")} <small>${unit}</small>`;
+    return `${stockLen(st.e)} <small>${unit} cube</small>`;
+  }
+
+  function setStock(on) {
+    stock.on = on; stock.sig = "";
+    $("stockbar").hidden = !on; stockObj.visible = on;
+    document.querySelector('.views [data-view="stock"]').setAttribute("aria-pressed", String(on));
+    if (on) updateStock(true);
+    requestRender();
+  }
+  // refit when the shown parts change (tab, hiding parts), then place the shape (every render while on)
+  function updateStock(force) {
+    let sig = active ? docs.indexOf(active) + ":" : "-";
+    meshes.forEach((m, i) => { if (m.visible) sig += i.toString(36) + ","; });
+    if (force || sig !== stock.sig) { stock.sig = sig; stock.fit = stockFit(meshes); stock.axis = null; }
+    const st = stockOf(stock.shape);
+    stockParts.round.visible = !!st && st.shape === "round"; stockParts.box.visible = !!st && st.shape !== "round";
+    if (st) {
+      const c = stock.fit.center;
+      if (st.shape === "round") {
+        const h = stockParts.round; h.position.copy(c); h.rotation.set(0, 0, 0);
+        if (st.k === "x") h.rotation.z = Math.PI / 2; else if (st.k === "z") h.rotation.x = Math.PI / 2; // the cylinder is built along Y
+        h.scale.set(st.r, st.len, st.r);
+      } else {
+        const h = stockParts.box; h.position.copy(c); h.rotation.set(0, 0, 0);
+        if (st.shape === "block") h.scale.set(st.x, st.y, st.z); else h.scale.setScalar(st.e);
+      }
+    }
+    renderStockBar();
+  }
+  // the stock weighs as much as its volume in the parts' material (or the default one if they differ)
+  function stockDensity(list) { const d = new Set(list.map(partDensity)); return d.size === 1 ? [...d][0] : density(); }
+  function renderStockBar() {
+    const shown = meshes.filter((m) => m.visible);
+    document.querySelectorAll("#stockbar .seg [data-shape]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.shape === stock.shape)));
+    const k = stockAxis();
+    document.querySelectorAll("#stockbar [data-saxis]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.saxis === k)));
+    $("stockAxis").hidden = stock.shape !== "round";
+    $("stockAllowUnit").textContent = unit;
+    const allowIn = document.activeElement === $("stockAllow");
+    if (!allowIn) $("stockAllow").value = unit === "in" ? +(stock.allow / 25.4).toFixed(4) : +stock.allow.toFixed(3);
+    let html;
+    if (!stock.fit || !shown.length) html = `<p class="stocknote">No parts shown.</p>`;
+    else {
+      const partVol = shown.reduce((t, m) => t + meshStats(m).volume, 0), dens = stockDensity(shown);
+      const mixed = new Set(shown.map(partDensity)).size > 1;
+      const rows = ["round", "block", "cube"].map((sh) => {
+        const st = stockOf(sh), g = (st.vol / 1000) * dens, waste = Math.max(0, 1 - partVol / st.vol);
+        return `<tr data-shape="${sh}" class="${sh === stock.shape ? "on" : ""}" title="Stock volume ${fmtVol(st.vol)}">
+          <th>${{ round: "Round bar", block: "Block", cube: "Cube" }[sh]}</th><td class="sz">${stockSize(st)}</td>
+          <td>${fmtMass(g)}</td><td>${Math.round(waste * 100)}%</td></tr>`;
+      }).join("");
+      html = `<table class="stocktab"><thead><tr><th></th><th>Stock size</th><th>Weight</th><th>Cut away</th></tr></thead><tbody>${rows}</tbody></table>
+        <p class="stocknote">${shown.length === meshes.length ? "All parts" : `${shown.length} of ${meshes.length} parts`} · part ${fmtMass(gramsOf(shown))} · ${mixed ? `stock in ${esc(materialName())}` : esc(partMatName(shown[0]) || materialName())}</p>`;
+    }
+    const el = $("stockTable"); if (el.dataset.h !== html) { el.innerHTML = html; el.dataset.h = html; }
+  }
+  $("stockbar").addEventListener("click", (e) => {
+    const sh = e.target.closest("[data-shape]"), ax = e.target.closest("[data-saxis]");
+    if (sh) { stock.shape = sh.dataset.shape; store.set("stockShape", stock.shape); }
+    else if (ax) stock.axis = ax.dataset.saxis;
+    else return;
+    updateStock(); requestRender();
+  });
+  $("stockAllow").addEventListener("input", (e) => {
+    const v = parseFloat(e.target.value);
+    stock.allow = v >= 0 ? (unit === "in" ? v * 25.4 : v) : 0; store.set("stockAllow", String(stock.allow));
+    updateStock(); requestRender();
+  });
+  // weights follow material changes made in the parts list or the measurement panel
+  document.addEventListener("change", () => { if (stock.on) { renderStockBar(); } });
 
   // ---------- geometry helpers ----------
   function faceIndexOf(mesh, tri) {
@@ -975,6 +1106,7 @@
     unit = unit === "mm" ? "in" : "mm"; store.set("unit", unit); $("unitBtn").textContent = unit;
     relabelDims(); requestRender(); // dimension labels follow the unit
     refreshReadout();
+    if (stock.on) renderStockBar();
   });
   // re-draw whatever the panel is showing (after a unit or material change)
   function refreshReadout() {
@@ -1369,6 +1501,7 @@
       dimLabelsB.forEach((l) => (l.hidden = true));
       drawDims(meshes, camera, { x: 0, y: 0, w: W, h: H }, dimLabels);
       if (cut.on) updateCut();
+      if (stock.on) updateStock();
       renderer.render(scene, camera);
     }
     if (labelPos && !label3d.hidden) {
