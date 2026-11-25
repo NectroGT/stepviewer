@@ -57,6 +57,14 @@ solid part, in millimetres. Use only cadquery (as cq) and math. Keep the code pl
 and cut features. Before the code block, list in a few lines the features you found and the views that show them."""
 
 
+PICTURE_NOTE = """This drawing sheet is only a picture (a scan or photo): no lines or text could be measured from it, so
+there are no coordinates. Take every size from the dimension text, never by scaling the picture. Use the units the
+sheet states (inch dimensions: multiply by 25.4 for millimetres; fractions like 5/8 are inches on an inch drawing).
+Tolerances (+0.003/+0.001, K7 and so on): build the nominal size. A section view (cutting line A-A) shows the part
+cut open: hatched areas are material cut by the plane, unhatched gaps inside are holes and pockets. Choose as the
+front view the drawing view that carries most of the dimensions, and keep the model frame described above."""
+
+
 # ------------------------------------------------------------------ reading the drawing
 
 def read_drawing(pdf, page=1, scale=None):
@@ -155,6 +163,65 @@ def read_drawing(pdf, page=1, scale=None):
     return dict(units="mm" if mm else "inch (values below are converted to mm)", scale=f"1:{scale:.4g} ({scale_note})",
                 views=out_views, texts=texts, hole_notes=notes, image_png=png,
                 unused_views=[repr(v) for v in views if id(v) not in used and (not ev or v is not ev[0]) and not v.iso])
+
+
+def is_picture(pdf, page=1):
+    """the page is only a picture (a scan or photo saved as PDF): no drawn lines or text to measure"""
+    import pymupdf
+    pg = pymupdf.open(pdf)[page - 1]
+    return bool(pg.get_images()) and len(pg.get_drawings()) < 20 and len(pg.get_text("words")) < 5
+
+
+_OCR = None
+
+
+def read_picture(pdf, page, out):
+    """a picture-only sheet: the image (whole and in four enlarged quarters, for the small text) and the text OCR
+    finds on it, with pixel positions in the whole image. Nothing can be measured from it."""
+    import io
+    import numpy as np
+    import pymupdf
+    from PIL import Image
+    global _OCR
+    doc = pymupdf.open(pdf)
+    pg = doc[page - 1]
+    xref = max(pg.get_images(full=True), key=lambda im: im[2] * im[3])[0]
+    im = Image.open(io.BytesIO(doc.extract_image(xref)["image"])).convert("RGB")
+    if max(im.size) > 2000:
+        f = 2000 / max(im.size)
+        im = im.resize((round(im.width * f), round(im.height * f)), Image.LANCZOS)
+    buf = io.BytesIO()
+    im.save(buf, "PNG")
+    W, H = im.size
+    tiles = []
+    for i, (x0, y0) in enumerate(((0, 0), (0.45, 0), (0, 0.45), (0.45, 0.45))):
+        box = (int(x0 * W), int(y0 * H), int((x0 + 0.55) * W), int((y0 + 0.55) * H))
+        t = im.crop(box)
+        f = 1800 / max(t.size)
+        t = t.resize((round(t.width * f), round(t.height * f)), Image.LANCZOS)
+        path = os.path.join(out, f"sheet_part{i + 1}.png")
+        t.save(path)
+        tiles.append(path)
+    texts = []
+    try:
+        if _OCR is None:
+            try:
+                from rapidocr import RapidOCR
+                _OCR = (RapidOCR(params={"Global.log_level": "warning"}), True)
+            except ImportError:
+                from rapidocr_onnxruntime import RapidOCR
+                _OCR = (RapidOCR(), False)
+        big = im.resize((W * 2, H * 2), Image.LANCZOS)
+        r = _OCR[0](np.array(big))
+        res = (list(zip(r.boxes, r.txts, r.scores)) if r.boxes is not None else []) if _OCR[1] else (r[0] or [])
+        for box, t, conf in res:
+            if float(conf) >= 0.5 and t.strip():
+                xs = [p[0] / 2 for p in box]
+                ys = [p[1] / 2 for p in box]
+                texts.append(dict(text=t.strip(), at_px=[round(sum(xs) / 4), round(sum(ys) / 4)]))
+    except Exception:                                 # OCR is a help only: Claude reads the image anyway
+        pass
+    return dict(picture=True, views={}, image_png=buf.getvalue(), tiles=tiles, texts=texts, size_px=[W, H])
 
 
 def _dedupe(segs):
@@ -400,16 +467,25 @@ def generate(pdf, out, page=1, rounds=3, effort="high", backend="claude-code", r
     out = os.path.abspath(out)
     os.makedirs(out, exist_ok=True)
     t0 = time.time()
-    d = read_drawing(pdf, page, scale)
+    picture = is_picture(pdf, page)
+    d = read_picture(pdf, page, out) if picture else read_drawing(pdf, page, scale)
     sheet = os.path.join(out, "sheet.png")
     open(sheet, "wb").write(d["image_png"])
-    open(os.path.join(out, "context.json"), "w", encoding="utf-8").write(context_text(d))
-    log(f"read the drawing: views {sorted(d['views'])}, scale {d['scale']}")
-
     chat = CliChat(out, effort) if backend == "claude-code" else ApiChat(out, effort)
-    text = ("The image is the drawing sheet. Measured from this drawing (model frame, mm):\n" + context_text(d)
-            + "\n\nBuild the part. Answer with the feature list and one code block defining build().")
-    images = [sheet]
+    if picture:
+        log(f"read the drawing: a picture (scan or photo), no lines to measure; OCR found {len(d['texts'])} texts")
+        text = (PICTURE_NOTE + "\nThe first image is the whole sheet; the next four are its quarters (top left, top "
+                "right, bottom left, bottom right), enlarged so the small text can be read.\nText an OCR program found "
+                "on the sheet (it can misread; positions are pixels in the first image, "
+                f"{d['size_px'][0]} x {d['size_px'][1]}):\n" + json.dumps(d["texts"])
+                + "\n\nBuild the part. Answer with the feature list and one code block defining build().")
+        images = [sheet] + d["tiles"]
+    else:
+        open(os.path.join(out, "context.json"), "w", encoding="utf-8").write(context_text(d))
+        log(f"read the drawing: views {sorted(d['views'])}, scale {d['scale']}")
+        text = ("The image is the drawing sheet. Measured from this drawing (model frame, mm):\n" + context_text(d)
+                + "\n\nBuild the part. Answer with the feature list and one code block defining build().")
+        images = [sheet]
     report = dict(drawing=os.path.abspath(pdf), page=page, rounds=[])
     best, prev_code, stop, worse = None, None, None, 0
     reviewed = not review                     # with review on, a model whose outlines match gets one inner-edge check
@@ -441,54 +517,71 @@ def generate(pdf, out, page=1, rounds=3, effort="high", backend="claude-code", r
                         + "\n\nFix the code. Answer with one code block defining build().")
             else:
                 png = os.path.join(out, f"attempt_{n}.png")
-                scores, summ = check(step, d, png, f"attempt {n}")
-                mean = summ["score"]
-                rec.update(scores=scores, mean_overlap=summ["mean_overlap"], edges=summ["edges"], score=mean)
                 problems = []
                 if res.get("solids", 1) != 1:
                     problems.append(f"the result has {res['solids']} separate solids; the part is one solid")
                 if not res.get("valid", True):
                     problems.append("the solid is not valid (check booleans and coincident faces)")
-                matched = summ["matched"] and not problems
-                before = best[0] if best else None
-                # keep the newest attempt that is as good: a correction the checks cannot see keeps the score
-                if best is None or mean >= best[0] - 0.0005:
-                    best = (mean, n, step)
-                rec["views_match"] = matched
-                # one weaker attempt gets a second chance from the best code; two in a row end it
-                worse = worse + 1 if not matched and before is not None and mean <= before + 0.0005 else 0
-                back = ""
-                if matched and reviewed:
-                    stop = "the outlines and edges match the drawing"
-                elif worse >= 2:
-                    stop = "two attempts in a row did not improve on the best one"
-                elif worse and best[1] != n:
-                    back = (f"This attempt scores {mean:.4f}, lower than attempt {best[1]} ({best[0]:.4f}). Start again "
-                            f"from attempt {best[1]}'s code (below) and change only what the notes above point to:\n"
-                            "```python\n" + open(os.path.join(out, f"attempt_{best[1]}.py"), encoding="utf-8").read()
-                            + "\n```\n\n")
-                images = [png, sheet]
-                head = ("The first image is your model, drawn as top, front and end views (black visible edges, blue "
-                        "dashed hidden edges) over the drawing's outline of each view (red); the second is the drawing "
-                        "sheet again.\n"
-                        f"Built size (x, y, z): {res['size']} mm, volume {res['volume']} mm3.\n"
-                        "Agreement per view (outline overlap 1.0 = same, areas in mm2; edges: drawing_explained = "
-                        "share of the drawing's visible lines lying on a model edge, model_explained = the other way "
-                        "round, places as (x, y) in that view):\n" + json.dumps(scores)
-                        + "".join("\n- " + t for t in edge_notes(scores))
-                        + ("\nAlso: " + "; ".join(problems) if problems else "") + "\n\n" + back)
-                if matched:
-                    reviewed = True
-                    text = head + ("The outlines and edges match. Now check everything inside them against the sheet: holes, "
-                                   "counterbores and countersinks, pockets, slots and channels, steps, and the hidden "
-                                   "(dashed) edges. If the model matches the drawing, answer with the single word "
-                                   "MATCHES and no code. Otherwise answer with the changes and one code block defining "
-                                   "build().")
+                if picture:                           # nothing measured to score against: Claude compares by eye
+                    import cadquery as cq
+                    from vlm_views import render_views, moved_to_origin
+                    render_views(moved_to_origin(cq.importers.importStep(step).val()), {}, png, f"attempt {n}",
+                                 iso=True)
+                    if best is None or not problems:
+                        best = (0.0, n, step)         # the newest attempt that builds one valid solid
+                    images = [png, sheet]
+                    text = ("The first image is your model, drawn as top, front and end views and an isometric view "
+                            "(black visible edges, blue dashed hidden edges); the second is the drawing sheet again.\n"
+                            f"Built size (x, y, z): {res['size']} mm, volume {res['volume']} mm3."
+                            + ("\nAlso: " + "; ".join(problems) if problems else "") + "\n\n"
+                            "Compare them feature by feature with every view of the drawing (sections and 3D views "
+                            "included): overall sizes against the dimensions, every hole, slot, step, pocket, chamfer "
+                            "and its position. If the model matches the drawing, answer with the single word MATCHES "
+                            "and no code. Otherwise answer with the changes and one code block defining build().")
                 else:
-                    text = head + ("Compare them, edges inside the views included, not just the outlines. Correct what "
-                                   "differs from the drawing: answer with the changes you make and one code block "
-                                   "defining build(). If you are sure the model already matches the drawing, answer "
-                                   "with the single word MATCHES and no code.")
+                    scores, summ = check(step, d, png, f"attempt {n}")
+                    mean = summ["score"]
+                    rec.update(scores=scores, mean_overlap=summ["mean_overlap"], edges=summ["edges"], score=mean)
+                    matched = summ["matched"] and not problems
+                    before = best[0] if best else None
+                    # keep the newest attempt that is as good: a correction the checks cannot see keeps the score
+                    if best is None or mean >= best[0] - 0.0005:
+                        best = (mean, n, step)
+                    rec["views_match"] = matched
+                    # one weaker attempt gets a second chance from the best code; two in a row end it
+                    worse = worse + 1 if not matched and before is not None and mean <= before + 0.0005 else 0
+                    back = ""
+                    if matched and reviewed:
+                        stop = "the outlines and edges match the drawing"
+                    elif worse >= 2:
+                        stop = "two attempts in a row did not improve on the best one"
+                    elif worse and best[1] != n:
+                        back = (f"This attempt scores {mean:.4f}, lower than attempt {best[1]} ({best[0]:.4f}). Start again "
+                                f"from attempt {best[1]}'s code (below) and change only what the notes above point to:\n"
+                                "```python\n" + open(os.path.join(out, f"attempt_{best[1]}.py"), encoding="utf-8").read()
+                                + "\n```\n\n")
+                    images = [png, sheet]
+                    head = ("The first image is your model, drawn as top, front and end views (black visible edges, blue "
+                            "dashed hidden edges) over the drawing's outline of each view (red); the second is the drawing "
+                            "sheet again.\n"
+                            f"Built size (x, y, z): {res['size']} mm, volume {res['volume']} mm3.\n"
+                            "Agreement per view (outline overlap 1.0 = same, areas in mm2; edges: drawing_explained = "
+                            "share of the drawing's visible lines lying on a model edge, model_explained = the other way "
+                            "round, places as (x, y) in that view):\n" + json.dumps(scores)
+                            + "".join("\n- " + t for t in edge_notes(scores))
+                            + ("\nAlso: " + "; ".join(problems) if problems else "") + "\n\n" + back)
+                    if matched:
+                        reviewed = True
+                        text = head + ("The outlines and edges match. Now check everything inside them against the sheet: holes, "
+                                       "counterbores and countersinks, pockets, slots and channels, steps, and the hidden "
+                                       "(dashed) edges. If the model matches the drawing, answer with the single word "
+                                       "MATCHES and no code. Otherwise answer with the changes and one code block defining "
+                                       "build().")
+                    else:
+                        text = head + ("Compare them, edges inside the views included, not just the outlines. Correct what "
+                                       "differs from the drawing: answer with the changes you make and one code block "
+                                       "defining build(). If you are sure the model already matches the drawing, answer "
+                                       "with the single word MATCHES and no code.")
         if stop:
             rec["stopped"] = stop
         report["rounds"].append(rec)
@@ -497,7 +590,8 @@ def generate(pdf, out, page=1, rounds=3, effort="high", backend="claude-code", r
         elif not rec["run"].get("ok"):
             msg = "build failed"
         else:
-            msg = f"overlap {rec['mean_overlap']:.4f}, edges {rec['edges']:.3f}" + (f" - {stop}" if stop else "")
+            msg = ((f"overlap {rec['mean_overlap']:.4f}, edges {rec['edges']:.3f}" if "edges" in rec else "built")
+                   + (f" - {stop}" if stop else ""))
         log(f"round {n}: {msg}")
         if stop:
             break
@@ -593,6 +687,13 @@ def convert(pdf, out, page=1, rounds=3, effort="high", backend="claude-code", re
     out = os.path.abspath(out)
     os.makedirs(out, exist_ok=True)
     t0 = time.time()
+    if is_picture(pdf, page):                         # a scan or photo: the rules converter has nothing to read
+        log("the page is a picture (scan or photo): straight to Claude")
+        report = generate(pdf, out, page, rounds, effort, backend, review, log, scale)
+        report.update(route="claude", rules=dict(error="the page is a picture: no lines to read"),
+                      seconds=round(time.time() - t0, 1))
+        json.dump(report, open(os.path.join(out, "report.json"), "w", encoding="utf-8"), indent=1, default=str)
+        return report
     d = read_drawing(pdf, page, scale)
     step, scores, summ = rules_attempt(pdf, out, page, d, scale)
     rules = dict(summ, scores=scores) if scores else summ

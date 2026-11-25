@@ -165,16 +165,21 @@ def claude_available():
 
 def start_claude(job, n, name):
     """Claude builds page n's part (vlm.generate) in a thread; the result is added as <name>_claude beside the
-    rules converter's part (called with the lock held)"""
+    rules converter's part, or as pNN_claude when name is empty (a page the converter cannot read: a scan or photo,
+    or one it built nothing from). Called with the lock held."""
     p = job["pages"][n - 1]
     if p.get("claude") == "running" or p.get("convert") in ("queued", "converting"):
         return
-    rules = next((r for r in p.get("parts_out") or [] if r.get("name") == name and r.get("built")), None)
-    if rules is None:
-        return
+    if name:
+        rules = next((r for r in p.get("parts_out") or [] if r.get("name") == name and r.get("built")), None)
+        if rules is None:
+            return
+    else:
+        rules, name = {}, f"p{n:02d}"
     p["claude"] = "running"; p["claude_status"] = "reading the drawing"; p.pop("claude_error", None)
     out = os.path.join(job["dir"], f"p{n:02d}")
     cdir = os.path.join(out, "claude")
+    os.makedirs(out, exist_ok=True)
     cname = name + "_claude"
 
     def log(*a):
@@ -203,7 +208,10 @@ def start_claude(job, n, name):
                         check=dict(matched=bool(best.get("views_match")), mean_overlap=best.get("mean_overlap"),
                                    edges=best.get("edges"),
                                    views={k: dict(overlap=v["overlap"], edges=v.get("edges", {}).get("drawing_explained"))
-                                          for k, v in (best.get("scores") or {}).items()}))
+                                          for k, v in (best.get("scores") or {}).items()})
+                        if "scores" in best else
+                        # a picture: nothing measured to check against; Claude's own comparison is all there is
+                        dict(by_claude=True, matched=str(rep.get("stopped", "")).startswith("Claude checked")))
             with lock:
                 p["parts_out"] = [x for x in p.get("parts_out") or [] if x.get("name") != cname] + [part]
                 p["claude"] = "done"

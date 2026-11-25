@@ -34,6 +34,13 @@ views' outlines and the lines inside them; see "Converting with Claude" below) a
 **Fix with Claude** button when Claude Code is on the computer running the app: Claude builds the page's part
 (1-3 minutes, on that computer's Claude subscription) and it is added beside the converter's as `<name>_claude`,
 with its own check. Only that button sends anything out: the page image and what was read from it go to Claude.
+**Build with Claude:** pages the converter cannot build from - scans and photos of drawings (a picture saved as PDF
+has no lines to measure), or pages it built nothing from - get a **Build with Claude** button instead. For a
+picture, Claude gets the whole sheet, its four quarters enlarged (to read the small text) and the text OCR found on
+it, and takes every size from the dimension text (inch drawings are converted to mm). There is nothing measured to
+check its model against, so it checks by eye: it compares its model's views with the sheet and corrects them, and
+the part is marked "Claude: matches" or "check by eye". `python vlm.py scan.pdf -o out/` does the same from the
+command line.
 
 **Open in viewer:** the app also serves the ConnectIQ STP Viewer from this repo (`../site`) at
 `http://127.0.0.1:5000/viewer/`. Each converted part has an **Open in viewer** button that opens its STEP file
