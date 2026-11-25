@@ -78,11 +78,11 @@ def group_parts(views, pair_tol=0.03):
                 continue
             if abs(v.x0 - plan.x0) < pair_tol and abs(v.x1 - plan.x1) < pair_tol:
                 d = "below" if v.y1 < plan.y0 else "above"
-                if v.h < 0.8 * plan.h and abs(v.h - plan.h) > pair_tol:
+                if v.h < 0.8 * plan.h + 1e-3 and abs(v.h - plan.h) > pair_tol:      # a 40 deep part on a 50 high view is 0.8 exactly
                     side.append((d, v))
                 elif abs(v.h - plan.h) < pair_tol and d == "below" and bottom is None:
                     bottom = v
-            elif abs(v.y0 - plan.y0) < pair_tol and abs(v.y1 - plan.y1) < pair_tol and v.w < 0.8 * plan.w:
+            elif abs(v.y0 - plan.y0) < pair_tol and abs(v.y1 - plan.y1) < pair_tol and v.w < 0.8 * plan.w + 1e-3:
                 side.append(("right" if v.x0 > plan.x1 else "left", v))
             elif _end_view(v, plan, "x"):
                 side.append(("below" if v.y1 < plan.y0 else "above", v))
@@ -651,9 +651,17 @@ def recognize(plan, side, bottom, scale, snap=0.0005):
                                 if near < 0.1:          # a chamfer at the mouth leaves a small gap
                                     depth = max(depth or 0, far)
                         bores.append((p.r * scale, (depth or p.r * 4) * scale, rdr.where, depth is not None))
-                # a circle just outside a bore with no hidden lines of its own is the bore's chamfer edge
-                bores = [b[:3] for b in bores
-                         if b[3] or not any(o[3] and 0 < b[0] - o[0] < 0.1 * scale for o in bores)]
+                # a circle just outside a bore with no hidden lines of its own is the bore's chamfer edge:
+                # keep it as the width of a 45 deg chamfer at the bore's mouth (the end facing this view)
+                kept = []
+                for b in bores:
+                    if b[3]:
+                        cham = max((o[0] - b[0] for o in bores
+                                    if not o[3] and 0 < o[0] - b[0] < 0.1 * scale), default=0.0)
+                        kept.append((*b[:3], cham))
+                    elif not any(o[3] and 0 < b[0] - o[0] < 0.1 * scale for o in bores):
+                        kept.append((*b[:3], 0.0))
+                bores = kept
                 pm.turned = (axis, "x" if rdr.horizontal else "y", bores)
                 keys = _keyways(pm, plan, rdr, big, scale)
                 pm.holes, pm.side_holes, pm.cuts = [], [], keys
@@ -761,6 +769,21 @@ def _hidden_edge_holes(pm, plan, outer, scale, M):
             if dup is not None:
                 if dup.depth < depth:
                     dup.depth = depth                          # the plan view shows the full depth
+                continue
+            # a hole already found on the same axis line (from a side view, or this pair of hidden lines seen
+            # from the wall's other face) is the same hole: the side view gives its true height
+            mx, my = M((ax + tx * tc + nx, ay + ty * tc + ny))
+            dmx, dmy = mx - ex, my - ey
+            dl = math.hypot(dmx, dmy) or 1.0
+            dmx, dmy = dmx / dl, dmy / dl
+            def _on_axis(h):
+                hx, hy = M((0, 0)); kx, ky = M(h.direction)
+                hdx, hdy = kx - hx, ky - hy
+                hl = math.hypot(hdx, hdy) or 1.0
+                if abs(dmx * hdy - dmy * hdx) / hl > 0.02:     # not parallel
+                    return False
+                return abs((h.entry[0] - ex) * dmy - (h.entry[1] - ey) * dmx) < 0.02
+            if any(_on_axis(h) for h in pm.side_holes):
                 continue
             pc = (ax + tx * tc + nx * depth / scale / 2, ay + ty * tc + ny * depth / scale / 2)
             pm.side_holes.append(SideHole((ex, ey), (nx, ny), T / 2, sp * scale / 2, depth, paper=pc))

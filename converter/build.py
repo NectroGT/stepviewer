@@ -121,7 +121,10 @@ def build(pm):
     for sh in pm.side_holes:
         (x, y), (dx, dy) = sh.entry, sh.direction
         try:
-            cyl = cq.Solid.makeCylinder(sh.r, sh.depth + 0.02, cq.Vector(x - 0.02 * dx, y - 0.02 * dy, sh.z), cq.Vector(dx, dy, 0))
+            # a hole that reaches the far face (THRU) is run past it, else rounding leaves a paper-thin skin
+            ex, ey = x + (sh.depth + 0.01) * dx, y + (sh.depth + 0.01) * dy
+            past = 0.0 if body.val().isInside(cq.Vector(ex, ey, sh.z), 1e-4) else 0.02
+            cyl = cq.Solid.makeCylinder(sh.r, sh.depth + 0.02 + past, cq.Vector(x - 0.02 * dx, y - 0.02 * dy, sh.z), cq.Vector(dx, dy, 0))
             body = body.cut(cq.Workplane().add(cyl))
         except Exception as e:
             pm.notes.append(f"side hole skipped ({type(e).__name__})")
@@ -150,9 +153,17 @@ def _turned(pm):
         prof = [(max(r, 0.0), y) for r, y in prof]
         body = cq.Workplane("XY").polyline(prof).close().revolve(360, (0, 0, 0), (0, 1, 0))
         ymin, ymax = half.bounds[1], half.bounds[3]
-        for r, d, where in bores:
+        for r, d, where, cham in bores:
             y0 = ymax - d if where == "above" else ymin
             body = body.cut(cq.Workplane("XZ").workplane(offset=-y0).circle(r).extrude(-d))
+            if cham > 0:
+                # 45 deg cone at the mouth: r + cham at the end face down to r, run a little past the face
+                ym, s, e = (ymax, 1, 0.01) if where == "above" else (ymin, -1, 0.01)
+                cone = [(0, ym + s * e), (r + cham + e, ym + s * e), (r, ym - s * cham), (0, ym - s * cham)]
+                try:
+                    body = body.cut(cq.Workplane("XY").polyline(cone).close().revolve(360, (0, 0, 0), (0, 1, 0)))
+                except Exception as ex:
+                    pm.notes.append(f"bore chamfer skipped ({type(ex).__name__})")
     else:
         half = poly.intersection(sg.box(-1e3, axis, 1e3, 1e3))
         prof = [(x, y - axis) for x, y in half.exterior.coords[:-1]]
