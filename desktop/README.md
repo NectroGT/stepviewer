@@ -20,7 +20,8 @@ npx electron-builder --win nsis
 
 The installer is written to `dist/ConnectIQ.STP.Viewer.Setup.exe` (about 120 MB). It installs for
 the current user, adds Start-menu and desktop shortcuts, and registers the viewer for STEP, IGES and BREP
-files. To release a new version, raise `version` in `package.json` first.
+files. Meshes (STL, OBJ, 3MF, glTF) open from File > Open or by dragging them in; the viewer is not registered for
+them, so it does not take them over from a slicer or 3D printing app. To release a new version, raise `version` in `package.json` first.
 
 The installer isn't code-signed, so Windows SmartScreen shows "Windows protected your PC" the first time:
 click **More info**, then **Run anyway**. Signing needs a paid code-signing certificate.

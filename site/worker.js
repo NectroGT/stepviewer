@@ -66,6 +66,7 @@ self.onmessage = async (e) => {
   const m = e.data;
   if (m.init) { // m.init is the site's base URL
     try {
+      importScripts(new URL("mesh.js", m.init).href);
       importScripts(new URL("occt-import-js.js", m.init).href);
       occt = await occtimportjs({ locateFile: (p) => new URL(p, m.init).href });
       postMessage({ ready: true });
@@ -76,7 +77,8 @@ self.onmessage = async (e) => {
   }
   try {
     const data = new Uint8Array(m.buf);
-    const res = m.ext === "stp" || m.ext === "step" ? occt.ReadStepFile(data, m.params)
+    const res = self.MeshFiles.EXTS.includes(m.ext) ? await self.MeshFiles.read(m.ext, m.buf)   // STL, OBJ, 3MF, glTF
+      : m.ext === "stp" || m.ext === "step" ? occt.ReadStepFile(data, m.params)
       : m.ext === "igs" || m.ext === "iges" ? occt.ReadIgesFile(data, m.params) : occt.ReadBrepFile(data, m.params);
     // hand the big arrays over as typed arrays without copying them
     const transfer = [];

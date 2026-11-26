@@ -11,7 +11,7 @@ const crypto = require("node:crypto");
 
 const SITE = app.isPackaged ? path.join(process.resourcesPath, "site") : path.join(__dirname, "..", "site");
 const ORIGIN = "app://viewer";
-const MODEL = /\.(stp|step|igs|iges|brep|brp)$/i;
+const MODEL = /\.(stp|step|igs|iges|brep|brp|stl|obj|3mf|gltf|glb)$/i;
 const TYPES = {
   ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".wasm": "application/wasm",
   ".png": "image/png", ".svg": "image/svg+xml", ".woff2": "font/woff2", ".json": "application/json",
@@ -151,7 +151,10 @@ async function chooseFiles() {
     title: "Open STEP files",
     properties: ["openFile", "multiSelections"],
     filters: [
+      { name: "3D models (STEP, IGES, BREP, STL, OBJ, 3MF, glTF)",
+        extensions: ["stp", "step", "igs", "iges", "brep", "brp", "stl", "obj", "3mf", "gltf", "glb"] },
       { name: "CAD models (STEP, IGES, BREP)", extensions: ["stp", "step", "igs", "iges", "brep", "brp"] },
+      { name: "Meshes (STL, OBJ, 3MF, glTF)", extensions: ["stl", "obj", "3mf", "gltf", "glb"] },
       { name: "All files", extensions: ["*"] },
     ],
   });

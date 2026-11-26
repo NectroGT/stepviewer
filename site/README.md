@@ -3,6 +3,13 @@
 A phone-friendly web page for opening STEP (also IGES/BREP) files, browsing the part tree, and
 measuring part sizes, hole diameters and distances.
 
+It also opens meshes: STL (binary and text), OBJ, 3MF and glTF / GLB (`mesh.js`). A mesh is only triangles, so
+its faces are worked out from them: triangles meeting at less than 30° form one face, which makes flat faces and
+hole walls pickable and measurable, but sizes are as exact as the mesh is fine. STL and OBJ have no units and are
+read as millimetres; 3MF states its unit; glTF is in metres (a model over 10 units across is taken as millimetres,
+as several CAD exporters write it) and is turned from Y up to Z up. Compressed glTF (Draco, meshopt) and glTF
+with a separate .bin file are not read: save as .glb.
+
 ## Privacy
 
 - Files you open are read and processed inside your browser. Nothing is uploaded.
