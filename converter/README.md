@@ -69,35 +69,6 @@ a pocket, a step); the edges show it. A model matches when the mean overlap is 0
 share is 0.93 or more (exact models score 0.94-1.0; a base missing its channel, with matching outlines, scored
 0.35-0.56).
 
-## Converting with Claude (vlm.py)
-A second route, from the command line only: Claude reads the sheet and writes the part as CadQuery code, using the
-converter's exact measurements, and corrects it until its views match the drawing (the check above). It runs
-through Claude Code on your Claude subscription (no API key, no per-use charge; it counts toward your plan's usage
-limits).
-```
-python vlm.py drawing.pdf -o out/                     # rules first, Claude only if needed; out/model.step in mm
-python vlm.py drawing.pdf -o out/ --claude-only       # straight to Claude
-python vlm.py drawing.pdf -o out/ --rounds 4 --effort xhigh
-python vlm.py drawing.pdf -o out/ --backend api       # the Claude API instead (pip install anthropic, billed per token)
-```
-1. The free rules converter (`pdf2step.py`) goes first. Its model is turned into the drawing's frame and checked; if
-   it matches, that is the result and Claude is not called.
-2. Otherwise Claude gets the sheet image plus each view's outline, edges, circles and the text read from it (model
-   frame, mm) and writes a `build()` function. Each round is one `claude -p` call resuming the same session; Claude
-   gets only the Read tool (to look at the images), so it cannot edit files or run commands.
-3. The code runs in a separate Python process (3 minutes at most); its model is checked, and the scores, where the
-   drawing's lines lack a model edge, and a picture of its views over the drawing go back to Claude.
-4. It stops when the outlines and edges match and Claude, in one review round, answers MATCHES; when two attempts
-   in a row do not improve (after the first, Claude is sent the best attempt's code to start from); when the code
-   does not change; or at `--rounds` (default 3).
-A page that is only a picture (a scan or photo saved as PDF) has nothing to measure: Claude gets the sheet, its four
-quarters enlarged (for the small text) and the text OCR found, takes every size from the dimension text (inch
-drawings converted to mm) and compares its model's views with the sheet by eye.
-`out/` keeps every attempt (`attempt_N.py/.step/.png`), `model.step` and `report.json` (route, scores, why it
-stopped, time). Needs Claude Code signed in (`claude` on the PATH, else the copy in the VS Code extension; or set
-`CLAUDE_CLI`). The drawing image and the text read from it are sent to Claude, so do not use it for drawings that
-must not leave this computer; the code Claude writes runs on this computer, in its own process with a time limit.
-
 ## How it works
 1. **Reads the lines, not a picture.** The PDF keeps the drawing as true lines, arcs and circles. Thick
    strokes are visible edges; thin strokes are hidden / centre / dimension lines; filled shapes (text, arrow
