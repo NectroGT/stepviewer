@@ -195,8 +195,12 @@ def read_picture(pdf, page, out):
     global _OCR
     doc = pymupdf.open(pdf)
     pg = doc[page - 1]
-    xref = max(pg.get_images(full=True), key=lambda im: im[2] * im[3])[0]
-    im = Image.open(io.BytesIO(doc.extract_image(xref)["image"])).convert("RGB")
+    if pg.get_images():
+        xref = max(pg.get_images(full=True), key=lambda im: im[2] * im[3])[0]
+        im = Image.open(io.BytesIO(doc.extract_image(xref)["image"])).convert("RGB")
+    else:                                             # a drawn sheet the converter could not read: render it
+        zoom = 2000 / max(pg.rect.width, pg.rect.height)
+        im = Image.open(io.BytesIO(pg.get_pixmap(matrix=pymupdf.Matrix(zoom, zoom), alpha=False).tobytes("png"))).convert("RGB")
     if max(im.size) > 2000:
         f = 2000 / max(im.size)
         im = im.resize((round(im.width * f), round(im.height * f)), Image.LANCZOS)
@@ -498,31 +502,50 @@ def _same_code(a, b):
     return norm(a) == norm(b)
 
 
+def drawing_prompt(d, brief=False):
+    """the first message for a measured (vector) drawing; its image is the sheet. Also used to write training data
+    (training/make_dataset.py), so a fine-tuned model sees exactly this."""
+    return ("The image is the drawing sheet. Measured from this drawing (model frame, mm):\n" + context_text(d, brief)
+            + "\n\nBuild the part. Answer with the feature list and one code block defining build().")
+
+
+def picture_prompt(d):
+    """the first message for a picture-only sheet; its images are the sheet and its four enlarged quarters"""
+    return (PICTURE_NOTE + "\nThe first image is the whole sheet; the next four are its quarters (top left, top "
+            "right, bottom left, bottom right), enlarged so the small text can be read.\nText an OCR program found "
+            "on the sheet (it can misread; positions are pixels in the first image, "
+            f"{d['size_px'][0]} x {d['size_px'][1]}):\n" + json.dumps(d["texts"])
+            + "\n\nBuild the part. Answer with the feature list and one code block defining build().")
+
+
 def generate(pdf, out, page=1, rounds=3, review=True, log=print, scale=None, chat=None):
     """the VLM builds the part; chat: options for make_chat (model, url, allow_remote, max_new_tokens, dtype)"""
     out = os.path.abspath(out)
     os.makedirs(out, exist_ok=True)
     t0 = time.time()
     picture = is_picture(pdf, page)
-    d = read_picture(pdf, page, out) if picture else read_drawing(pdf, page, scale)
+    d = None
+    if not picture:
+        try:
+            d = read_drawing(pdf, page, scale)
+        except BaseException as e:                    # SystemExit too: no scale / no lined-up views found
+            if isinstance(e, KeyboardInterrupt):
+                raise
+            log(f"the converter could not read this sheet ({e}); the VLM reads it as a picture")
+            picture = True
+    if picture:
+        d = read_picture(pdf, page, out)
     sheet = os.path.join(out, "sheet.png")
     open(sheet, "wb").write(d["image_png"])
     log("loading the model" if not (chat or {}).get("url") else f"model server {(chat or {})['url']}")
     chat = make_chat(chat)
     if picture:
         log(f"read the drawing: a picture (scan or photo), no lines to measure; OCR found {len(d['texts'])} texts")
-        text = (PICTURE_NOTE + "\nThe first image is the whole sheet; the next four are its quarters (top left, top "
-                "right, bottom left, bottom right), enlarged so the small text can be read.\nText an OCR program found "
-                "on the sheet (it can misread; positions are pixels in the first image, "
-                f"{d['size_px'][0]} x {d['size_px'][1]}):\n" + json.dumps(d["texts"])
-                + "\n\nBuild the part. Answer with the feature list and one code block defining build().")
-        images = [sheet] + d["tiles"]
+        text, images = picture_prompt(d), [sheet] + d["tiles"]
     else:
         open(os.path.join(out, "context.json"), "w", encoding="utf-8").write(context_text(d, chat.brief))
         log(f"read the drawing: views {sorted(d['views'])}, scale {d['scale']}")
-        text = ("The image is the drawing sheet. Measured from this drawing (model frame, mm):\n" + context_text(d, chat.brief)
-                + "\n\nBuild the part. Answer with the feature list and one code block defining build().")
-        images = [sheet]
+        text, images = drawing_prompt(d, chat.brief), [sheet]
     report = dict(drawing=os.path.abspath(pdf), page=page, rounds=[])
     best, prev_code, stop, worse = None, None, None, 0
     last_match, last_text = None, ""      # the measured check of the newest attempt, and what was sent about it

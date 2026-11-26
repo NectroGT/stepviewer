@@ -109,6 +109,23 @@ CadQuery for a real drawing; 7-8B models need about 16 GB of memory and do far b
 (much better at this) need a GPU with 24 GB or more - run those on a server and use `--url`. The code the VLM writes
 runs on this computer, in its own process with a time limit.
 
+## Training data for a fine-tuned VLM (training/)
+Makes drawing -> answer pairs for training a LoRA adapter on Qwen-VL / InternVL, in exactly the form vlm.py sends
+and expects. Needs the step2drawing repo (STEP -> drawing) next to this one, or `--s2d path`.
+```
+python training/gen_parts.py gen/ 2000 --seed 1          # random parts: answer.py (features + build()) + model.step
+python training/make_dataset.py gen/ data/               # drawings, checks and examples -> data/train.jsonl, val.jsonl
+python training/make_dataset.py gen/ data/ --full        # full measured context, for a model served with --url
+```
+- Parts: shafts, bushings, flanges (40% turned), housings with several features, plates, L-brackets, stepped blocks.
+  The code that made a part is its answer; each answer is rebuilt and must give exactly the solid on its sheet.
+- The data leans towards what the rules converter cannot do: sheets it already builds are mostly dropped (`--easy`,
+  0.15 kept); half the parts also get the sheet with its text drawn as lines (`--lines`) and half a fake scan
+  (`--scans`). Sheets the converter cannot read go through vlm.py's picture route, as they would in use.
+- Each JSON line holds `messages` (system, user with image paths + text, assistant) plus `kind` (drawn,
+  text_as_lines, scan), `route` (measured, picture) and `rules_ok`. About 20 s and 4 MB per part with 6 processes;
+  drawings already made are reused when it is run again. Keep your real test drawings out of training.
+
 ## How it works
 1. **Reads the lines, not a picture.** The PDF keeps the drawing as true lines, arcs and circles. Thick
    strokes are visible edges; thin strokes are hidden / centre / dimension lines; filled shapes (text, arrow
