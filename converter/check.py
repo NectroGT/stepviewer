@@ -26,7 +26,8 @@ sys.path.insert(0, HERE)
 
 VIEW_AXES = {"top": (0, 1), "front": (0, 2), "end": (1, 2)}
 # projector for hidden-line drawings: (direction towards the viewer, x direction of the 2D view)
-PROJECTORS = {"top": ((0, 0, 1), (1, 0, 0)), "front": ((0, -1, 0), (1, 0, 0)), "end": ((1, 0, 0), (0, 1, 0))}
+PROJECTORS = {"top": ((0, 0, 1), (1, 0, 0)), "front": ((0, -1, 0), (1, 0, 0)), "end": ((1, 0, 0), (0, 1, 0)),
+              "iso": ((1, -1, 1), (1, 1, 0))}       # iso: from front-right-top, for pictures (vlm.py) only
 
 
 def moved_to_origin(shape):
@@ -144,13 +145,13 @@ def edge_match(model_edges, drawing_edges, tol=0.2, step=0.25):
     return out
 
 
-def render_views(shape, drawing_views, path, title=""):
+def render_views(shape, drawing_views, path, title="", iso=False):
     """a picture of the model's three views (visible edges solid, hidden dashed) with the drawing's outline of
     each view in red underneath, to see where it differs"""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-    names = [v for v in ("top", "front", "end") if v in drawing_views or shape is not None]
+    names = [v for v in ("top", "front", "end") if v in drawing_views or shape is not None] + (["iso"] if iso else [])
     fig, axs = plt.subplots(1, len(names), figsize=(6 * len(names), 5))
     axs = np.atleast_1d(axs)
     for ax, v in zip(axs, names):
@@ -171,7 +172,8 @@ def render_views(shape, drawing_views, path, title=""):
             for pl in vis:
                 ax.plot(*zip(*pl), color="black", lw=1.2, zorder=3)
         ax.set_aspect("equal")
-        ax.set_title(f"{v} view  ({'x, y' if v == 'top' else 'x, z' if v == 'front' else 'y, z'} in mm)")
+        ax.set_title("isometric view (from front, right, above)" if v == "iso" else
+                     f"{v} view  ({'x, y' if v == 'top' else 'x, z' if v == 'front' else 'y, z'} in mm)")
         ax.grid(alpha=0.3)
     if title:
         fig.suptitle(title)

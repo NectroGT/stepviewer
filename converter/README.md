@@ -69,6 +69,46 @@ a pocket, a step); the edges show it. A model matches when the mean overlap is 0
 share is 0.93 or more (exact models score 0.94-1.0; a base missing its channel, with matching outlines, scored
 0.35-0.56).
 
+## Converting with a local VLM (vlm.py)
+A second route, from the command line: an open vision-language model (VLM) - Qwen-VL, InternVL or LLaVA - reads the
+sheet and writes the part as CadQuery code, using the converter's exact measurements, and corrects it until its
+views match the drawing (the check above). The model runs on this computer or on a server in your network, so
+drawings never leave them.
+```
+pip install torch transformers accelerate             # once, to run a model in this process
+python vlm.py drawing.pdf -o out/                     # rules first, the VLM only if needed; out/model.step in mm
+python vlm.py drawing.pdf -o out/ --model OpenGVLab/InternVL3-2B-hf
+python vlm.py drawing.pdf -o out/ --vlm-only          # straight to the VLM
+python vlm.py drawing.pdf -o out/ --url http://gpu-box:8000/v1 --model Qwen/Qwen2.5-VL-32B-Instruct
+```
+**Running the model:**
+- *In this process* (default): Hugging Face `transformers` loads the model's weights, downloaded once from
+  huggingface.co into its cache (only the weights come down; nothing is sent). `--model` takes a Hugging Face id:
+  `Qwen/Qwen2.5-VL-3B-Instruct` (default), `Qwen/Qwen2.5-VL-7B-Instruct`, `OpenGVLab/InternVL3-1B-hf` / `-2B-hf` /
+  `-8B-hf`, `llava-hf/llava-onevision-qwen2-0.5b-ov-hf` / `-7b-ov-hf`, `llava-hf/llava-1.5-7b-hf`.
+- *On a model server* (`--url`): an OpenAI-compatible server in your network, e.g. vLLM
+  (`vllm serve Qwen/Qwen2.5-VL-32B-Instruct`) or LMDeploy for InternVL, on a GPU machine. An address outside this
+  computer and your private network is refused (unless `--allow-remote`).
+
+**How it works:**
+1. The free rules converter (`pdf2step.py`) goes first. Its model is turned into the drawing's frame and checked; if
+   it matches, that is the result and the VLM is not used.
+2. Otherwise the VLM gets the sheet image plus each view's outline, edges, circles and the text read from it (model
+   frame, mm; shortened for in-process models) and writes a `build()` function.
+3. The code runs in a separate Python process (3 minutes at most); its model is checked, and the scores, where the
+   drawing's lines lack a model edge, and a picture of its views over the drawing go back to the VLM.
+4. It stops when the outlines and edges match and the VLM, in one review round, answers MATCHES (a MATCHES the
+   measured check disagrees with is refused); when two attempts in a row do not improve; when the code does not
+   change; or at `--rounds` (default 3). `report.json` says whether the saved model passed the check (`matched`).
+A page that is only a picture (a scan or photo saved as PDF) has nothing to measure: the VLM gets the sheet, its four
+quarters enlarged (for the small text) and the text OCR found, takes every size from the dimension text and compares
+its model's views with the sheet by eye (`matched` is then empty: nothing could check it).
+
+**Hardware:** small models (1-3B) run on a laptop's CPU, slowly (minutes per answer), and rarely write correct
+CadQuery for a real drawing; 7-8B models need about 16 GB of memory and do far better on an NVIDIA GPU; 32B and up
+(much better at this) need a GPU with 24 GB or more - run those on a server and use `--url`. The code the VLM writes
+runs on this computer, in its own process with a time limit.
+
 ## How it works
 1. **Reads the lines, not a picture.** The PDF keeps the drawing as true lines, arcs and circles. Thick
    strokes are visible edges; thin strokes are hidden / centre / dimension lines; filled shapes (text, arrow
