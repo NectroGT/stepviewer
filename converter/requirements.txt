@@ -5,4 +5,3 @@ cadquery>=2.4
 rapidocr>=3.0
 onnxruntime
 flask>=3.0
-anthropic>=2.0      # only for vlm.py --backend api

@@ -2,9 +2,6 @@
 
     python check_refs.py FOLDER            # FOLDER holds <name>-drawing.pdf (or <name>.pdf) + <name>.step pairs
     python check_refs.py FOLDER --keep out # also keep the converted STEP files in out/
-    python check_refs.py FOLDER --method vlm [--rounds 3]   # convert with Claude (vlm.py) instead of the rules
-    python check_refs.py FOLDER --method vlm --backend api  # ... through the Claude API (billed per token)
-    python check_refs.py FOLDER --method auto  # the rules first; Claude only where their model fails the check
 
 Each drawing is converted (page 1, scale read from the title block) and the result is compared with its
 reference model. The reference may be drawn in any orientation, so all 24 quarter-turn orientations are tried
@@ -81,25 +78,10 @@ def find_pairs(folder):
     return pairs
 
 
-def check_one(pdf, ref, out, method="rules", rounds=3, backend="claude-code"):
+def check_one(pdf, ref, out):
     """convert pdf (page 1) into out/ and compare it with ref. Returns compare()'s dict plus "model" (the
-    converted STEP), or {"error": ...}. Runs in a worker process in the web app.
-    method "vlm" converts with Claude (vlm.py, through Claude Code or the API); its dict also has "rounds"
-    and, with the API, "cost_usd"."""
+    converted STEP), or {"error": ...}. Runs in a worker process in the web app."""
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-    if method in ("vlm", "auto"):
-        try:
-            from vlm import generate, convert
-            r = (generate if method == "vlm" else convert)(pdf, out, rounds=rounds, backend=backend,
-                                                           log=lambda *a: None)
-            if not r.get("model_step"):
-                return dict(error="no attempt built a model", cost_usd=r.get("cost_usd"))
-            c = compare(r["model_step"], ref)
-            c.update(model=r["model_step"], cost_usd=r.get("cost_usd"), rounds=len(r["rounds"]),
-                     route=r.get("route", "claude"))
-            return c
-        except BaseException as e:
-            return dict(error=f"{type(e).__name__}: {e}")
     from pdf2step import run
     try:
         res = run(pdf, 1, None, out)
@@ -119,24 +101,16 @@ def main():
     ap.add_argument("folder")
     ap.add_argument("--keep", help="folder to keep the converted models in")
     ap.add_argument("--min", type=float, default=0.995, help="lowest overlap that passes")
-    ap.add_argument("--method", choices=["rules", "vlm", "auto"], default="rules",
-                    help="rules: the converter (pdf2step); vlm: Claude writes the model (vlm.py); auto: the rules, "
-                         "and Claude where their model does not match the drawing's outlines and edges")
-    ap.add_argument("--rounds", type=int, default=3, help="vlm: most correction rounds per drawing")
-    ap.add_argument("--backend", choices=["claude-code", "api"], default="claude-code",
-                    help="vlm: claude-code = your Claude subscription (default), api = the Claude API (billed)")
     args = ap.parse_args()
     out_root = args.keep or tempfile.mkdtemp(prefix="check_refs_")
     pairs = find_pairs(args.folder)
     if not pairs:
         raise SystemExit(f"no <name>-drawing.pdf + <name>.step pairs in {args.folder}")
 
-    failed, cost = 0, 0.0
-    print(f"{'part':28s} {'overlap':>8s} {'missing':>9s} {'extra':>9s} {'faces':>11s}"
-          + (("   rounds   cost $" if args.backend == "api" else "   rounds") if args.method != "rules" else ""))
+    failed = 0
+    print(f"{'part':28s} {'overlap':>8s} {'missing':>9s} {'extra':>9s} {'faces':>11s}")
     for name, pdf, ref in pairs:
-        c = check_one(pdf, ref, os.path.join(out_root, name), args.method, args.rounds, args.backend)
-        cost += c.get("cost_usd") or 0.0
+        c = check_one(pdf, ref, os.path.join(out_root, name))
         if "error" in c:
             failed += 1
             print(f"{name:28s} FAILED: {c['error']}")
@@ -145,12 +119,7 @@ def main():
         failed += not ok
         faces = f"{c['faces'][0]}/{c['faces'][1]}" if "faces" in c else "-"
         print(f"{name:28s} {c['overlap']:8.4f} {c['missing']:9.1f} {c['extra']:9.1f} {faces:>11s}"
-              + ((f"   {c.get('rounds', '-'):>6}" + (f"  {c.get('route', '')}" if args.method == "auto" else "") + (f"   {c.get('cost_usd') or 0:6.3f}" if args.backend == "api" else ""))
-                 if args.method != "rules" else "")
               + ("" if ok else "  << below --min") + (f"  ({c['note']})" if "note" in c else ""))
-    if args.method != "rules":
-        print(f"API cost for this run: ${cost:.2f}" if args.backend == "api"
-              else "billed to your Claude subscription (counts toward its usage limits)")
     if args.keep is None:
         print(f"(converted models in {out_root})")
     sys.exit(1 if failed else 0)

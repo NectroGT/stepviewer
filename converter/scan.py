@@ -70,8 +70,7 @@ def scan_page(pdf, i, text=True):
             r["warn"] = "Looks like an assembly drawing (parts list or item callouts) - check that what is built is one real part."
         return r
     if len(prims) < 500 and _image_cover(pdf, i) > 0.5:
-        r["reason"] = ("Scanned image: the page has no drawn lines for the converter to read (it needs a vector PDF "
-                       "exported from CAD). Build with Claude can read the drawing from the picture.")
+        r["reason"] = "Scanned image: the page has no drawn lines to read. Only vector PDFs exported from CAD work."
     elif not views:
         r["reason"] = "No drawing views on this page" + (" (text only)." if r["words"] else ".")
     elif assembly:
