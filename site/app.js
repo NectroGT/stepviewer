@@ -1359,6 +1359,7 @@
     try { w = await engine(); } catch (err) {
       // no worker support: read on the main thread as before (the page pauses while it reads)
       console.warn("CAD worker unavailable, reading on the main thread.", err);
+      if (MeshFiles.EXTS.includes(ext)) { await nextPaint(); return MeshFiles.read(ext, buf); }
       const occt = await (mainOcct ||= occtimportjs({ locateFile: (p) => p }));
       await nextPaint();
       const data = new Uint8Array(buf);
@@ -1386,7 +1387,7 @@
 
   // Files are read one after another; each one that opens becomes a tab. Cancel stops the
   // rest of the batch and keeps the files already opened.
-  const EXTS = ["stp", "step", "igs", "iges", "brep", "brp"];
+  const EXTS = ["stp", "step", "igs", "iges", "brep", "brp", ...MeshFiles.EXTS];   // meshes: mesh.js
   const PARAMS = { linearUnit: "millimeter", linearDeflectionType: "bounding_box_ratio", linearDeflection: 0.0008, angularDeflection: 0.35 };
   let loadSeq = 0, batch = null;
   async function loadFiles(files) {
@@ -1400,7 +1401,7 @@
       const already = docs.find((d) => d.name === f.name && d.size === f.size);
       if (already) { opened.push(already); continue; }
       if (!EXTS.includes(ext)) {
-        failed.push({ name: f.name, title: `${esc(f.name)} isn't a STEP file.`, detail: "Pick a .stp or .step file. IGES and BREP work too.", short: "not a STEP file" });
+        failed.push({ name: f.name, title: `${esc(f.name)} isn't a file this viewer opens.`, detail: "Pick a STEP file (.stp, .step). IGES and BREP work too, and meshes: STL, OBJ, 3MF, glTF / GLB.", short: "not a model file" });
         continue;
       }
       busy(`<div class="spin"></div><div>Reading ${n > 1 ? `${k + 1} of ${n}: ` : ""}<b>${esc(f.name)}</b>…</div><div class="hint">${(f.size / 1048576).toFixed(1)} MB. Large assemblies can take a minute on a phone.</div><button class="btn" type="button" data-cancel>Cancel</button>`);
@@ -1412,7 +1413,7 @@
         try { res = await parse(ext, buf, PARAMS); } catch (err) { if (!err.cancelled) freshEngine(); throw err; }
         if (my !== loadSeq) return;
         freshEngine();
-        if (!res || !res.success || !res.meshes.length) throw new Error("The file opened but has no solid geometry in it.");
+        if (!res || !res.success || !res.meshes.length) throw new Error(MeshFiles.EXTS.includes(ext) ? "The file opened but has no triangles in it." : "The file opened but has no solid geometry in it.");
         const doc = buildDoc(res, f);
         if (cut.on) cutDoc(doc, true);
         docs.push(doc); opened.push(doc);
@@ -1445,7 +1446,7 @@
     setReadout("");
     busy(`<img class="start-icon" src="icons/logo-160.png" alt="" width="80" height="80">
       <h2 class="start-title">Open a STEP file</h2>
-      <div class="hint">Choose one or more .stp or .step files from your phone. Each opens in its own tab. IGES and BREP work too.</div>
+      <div class="hint">Choose one or more .stp or .step files from your phone. Each opens in its own tab. IGES and BREP work too, and meshes (STL, OBJ, 3MF, glTF).</div>
       <button class="btn primary start-btn" type="button" data-open>Choose files</button>`);
   }
 
