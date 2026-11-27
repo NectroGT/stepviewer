@@ -1450,8 +1450,8 @@
       <button class="btn primary start-btn" type="button" data-open>Choose files</button>`);
   }
 
-  // ?open=/path/part.step (repeatable): open files from this same site, e.g. the "Open in viewer"
-  // buttons of the PDF-to-STEP converter (converter/app.py serves this viewer at /viewer/).
+  // ?open=/path/part.step (repeatable): open files from this same site, so a link can open a model
+  // straight in the viewer.
   // Only same-origin addresses are fetched; the page's CSP (connect-src 'self') enforces that too.
   async function openFromLink() {
     const urls = new URLSearchParams(location.search).getAll("open")

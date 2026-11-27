@@ -26,28 +26,6 @@ them, so it does not take them over from a slicer or 3D printing app. To release
 The installer isn't code-signed, so Windows SmartScreen shows "Windows protected your PC" the first time:
 click **More info**, then **Run anyway**. Signing needs a paid code-signing certificate.
 
-## Build the installer with PDF to STEP
-
-A second, larger installer adds **File > PDF to STEP…**: the converter from `../converter` (scans vector
-PDF drawings and builds STEP models), packaged with Python so nobody needs Python installed. Its
-**Open in viewer** buttons open each part as a tab in the viewer window.
-
-```
-cd converter
-pip install -r requirements.txt pyinstaller
-pyinstaller pdf2step-server.spec --noconfirm        # -> converter/dist/pdf2step-server (about 1.1 GB)
-cd ../desktop
-npx electron-builder --win nsis --config builder-full.js
-```
-
-The installer is `dist/ConnectIQ.STP.Viewer.PDF.to.STEP.Setup.exe` (about 400 MB; 1.4 GB installed). It is the
-same app as the plain viewer (same app ID), so installing one over the other switches between them.
-
-The converter runs as a hidden background program (`pdf2step-server.exe`) on 127.0.0.1 only, and answers only
-the app's own window (a random key per launch). It closes with the app, and its worker processes with it.
-Uploads and results are kept in `%APPDATA%\ConnectIQ STP Viewer\pdf2step-jobs`. `npm start` also offers
-PDF to STEP when Python and the converter's requirements are installed.
-
 ## Publish a download (GitHub Releases)
 
 GitHub can build the installer and put it on the repo's Releases page

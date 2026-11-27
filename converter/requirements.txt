@@ -1,7 +1,0 @@
-pymupdf>=1.24
-shapely>=2.0
-numpy
-cadquery>=2.4
-rapidocr>=3.0
-onnxruntime
-flask>=3.0

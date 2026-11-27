@@ -55,7 +55,7 @@ jobs:
         run: |
           v="${{ steps.ver.outputs.version }}"
           cat > notes.md <<'EOF'
-          Windows installer for ConnectIQ STP Viewer: open STEP, IGES and BREP files and measure parts. Files never leave your computer.
+          Windows installer for ConnectIQ STP Viewer: open STEP, IGES and BREP files (and STL, OBJ, 3MF and glTF meshes), measure parts, cut through them, estimate weight and compare raw material shapes. Files never leave your computer.
 
           **Install:** download `ConnectIQ.STP.Viewer.Setup.exe` below and run it. Windows may show "Windows protected your PC" because the installer isn't code-signed: click **More info -> Run anyway**. It installs for your user only (no admin needed), adds Start-menu and desktop shortcuts, and opens .stp/.step files you double-click.
 
